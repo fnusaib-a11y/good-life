@@ -1,0 +1,72 @@
+[
+  {
+    "id": "job_madrasa_01",
+    "title": "মাদ্রাসার বার্ষিক পরীক্ষার প্রশ্ন টাইপ করুন",
+    "description": "সংযুক্ত প্রশ্নপত্রের ছবি দেখে প্রতিটি প্রশ্ন ও অপশন হুবহু নিচে টাইপ করে জমা দিন।",
+    "jobType": "question_to_text",
+    "estimatedMinutes": 8,
+    "rewardAmount": 20,
+    "status": "active",
+    "referenceType": "image",
+    "referenceUrl": "https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=1200&q=80",
+    "instructions": "১. প্রশ্নের ক্রমিক নম্বর ও বিরামচিহ্ন ঠিক রাখুন।\n২. বানান ভুলের দিকে সতর্ক থাকুন।\n৩. সম্পূর্ণ লেখা শেষ করে \"কাজ জমা দিন\" বাটনে চাপুন।",
+    "expectedText": "প্রশ্ন ১: ইসলামের স্তম্ভ কয়টি ও কি কি? উত্তর: ইসলামের মূল স্তম্ভ পাঁচটি— ১. ঈমান, ২. নামাজ, ৩. রোজা, ৪. হজ এবং ৫. যাকাত। প্রতিটি মুসলিমের জন্য এগুলোর প্রতি বিশ্বাস ও আমল করা আবশ্যক।",
+    "validationMode": "flexible",
+    "minMatchPercentage": 85,
+    "maxCompletions": 50,
+    "currentCompletions": 14,
+    "allowMultipleSubmissionsPerUser": false,
+    "autoApproval": true,
+    "largeAdConfig": {
+      "enabled": true,
+      "provider": "auto",
+      "durationSeconds": 15
+    },
+    "createdAt": "2026-09-18T13:38:59.479Z"
+  },
+  {
+    "id": "job_notice_02",
+    "title": "জাতীয় পরিচয়পত্র সংক্রান্ত নোটিশ টাইপ",
+    "description": "সরকারী অফিসিয়াল নোটিশের স্ক্যান কপি দেখে টেক্সট ফিল্ডে নির্ভুলভাবে লিপিবদ্ধ করুন।",
+    "jobType": "document_to_text",
+    "estimatedMinutes": 6,
+    "rewardAmount": 18,
+    "status": "active",
+    "referenceType": "image",
+    "referenceUrl": "https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=1200&q=80",
+    "instructions": "তারিখ, স্মারক নম্বর এবং অনুচ্ছেদগুলো সঠিকভাবে লিখুন। কোন অতিরিক্ত শব্দ যোগ করবেন না।",
+    "expectedText": "স্মারক নং: ৪২.০১.০০০.১২৩. তারিখ: ১৫ মার্চ ২০২৬। সংশ্লিষ্ট সকলের অবগতির জন্য জানানো যাচ্ছে যে, আগামী রবিবার হতে এনআইডি সংশোধন ও বায়োমেট্রিক আপডেট কার্যক্রম সকাল ১০ ঘটিকায় শুরু হবে।",
+    "validationMode": "flexible",
+    "minMatchPercentage": 85,
+    "maxCompletions": 100,
+    "currentCompletions": 32,
+    "allowMultipleSubmissionsPerUser": false,
+    "autoApproval": true,
+    "largeAdConfig": {
+      "enabled": true,
+      "provider": "auto",
+      "durationSeconds": 15
+    },
+    "createdAt": "2026-09-20T01:38:59.479Z"
+  },
+  {
+    "id": "job_invoice_03",
+    "title": "দোকানের ক্যাশ মেমো বিল ভাউচার টাইপ",
+    "description": "ক্যাশ মেমোর পণ্যের বিবরণ, পরিমাণ ও মোট টাকার হিসাব নিচে টাইপ করুন।",
+    "jobType": "screenshot_to_text",
+    "estimatedMinutes": 5,
+    "rewardAmount": 15,
+    "status": "active",
+    "referenceType": "image",
+    "referenceUrl": "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=1200&q=80",
+    "instructions": "পণ্যের নাম ও দাম বাংলায় টাইপ করতে হবে। মোট টাকার পরিমাণ মিল থাকতে হবে।",
+    "expectedText": "ক্যাশ মেমো নং: ৮৮৯২। খদ্দেরের নাম: তানভীর হাসান। পণ্যের বিবরণ: চাল ২৫ কেজি— ৳১৮৫০, সয়াবিন তেল ৫ লিটার— ৳৮৮০, ডাল ২ কেজি— ৳২৬০। সর্বমোট পরিশোধিত বিল: ৳২৯৯০ টাকা মাত্র।",
+    "validationMode": "strict",
+    "minMatchPercentage": 92,
+    "maxCompletions": 40,
+    "currentCompletions": 8,
+    "allowMultipleSubmissionsPerUser": false,
+    "autoApproval": true,
+    "createdAt": "2026-09-20T07:38:59.479Z"
+  }
+]

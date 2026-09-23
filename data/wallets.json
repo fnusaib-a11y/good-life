@@ -1,0 +1,65 @@
+{
+  "usr_1789992708628": {
+    "userId": "usr_1789992708628",
+    "userPhone": "01926303508",
+    "balance": 100,
+    "totalEarned": 0,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-21T12:17:28.073Z"
+  },
+  "usr_01926303508": {
+    "userId": "usr_1789992708628",
+    "userPhone": "01926303508",
+    "balance": 100,
+    "totalEarned": 0,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-21T12:17:28.073Z"
+  },
+  "01926303508": {
+    "userId": "usr_1789992708628",
+    "userPhone": "01926303508",
+    "balance": 100,
+    "totalEarned": 0,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-21T12:17:28.073Z"
+  },
+  "usr_admin_01877722819": {
+    "userId": "usr_admin_01877722819",
+    "userPhone": "01877722819",
+    "balance": 0,
+    "totalEarned": 0,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-22T15:48:24.416Z"
+  },
+  "usr_01877722819": {
+    "userId": "usr_admin_01877722819",
+    "userPhone": "01877722819",
+    "balance": 0,
+    "totalEarned": 0,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-22T15:48:24.416Z"
+  },
+  "01877722819": {
+    "userId": "usr_admin_01877722819",
+    "userPhone": "01877722819",
+    "balance": 0,
+    "totalEarned": 0,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-22T15:48:24.416Z"
+  },
+  "test_usr_1": {
+    "userId": "test_usr_1",
+    "userPhone": "",
+    "balance": 400,
+    "totalEarned": 500,
+    "totalWithdrawn": 100,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-22T15:48:48.916Z"
+  }
+}

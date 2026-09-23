@@ -1,0 +1,35 @@
+[
+  {
+    "id": "tx_wd_test_100",
+    "createdAt": "2026-09-22T15:48:43.089Z",
+    "timestamp": 1790092123089,
+    "processed": true,
+    "credited": false,
+    "userId": "test_usr_1",
+    "type": "withdrawal",
+    "amount": 100,
+    "balanceBefore": 500,
+    "balanceAfter": 400,
+    "date": "২২/৯/২০২৬",
+    "status": "completed",
+    "description": "bKash এর মাধ্যমে উইথড্র রিকোয়েস্ট (হিসাব: 01700000000)",
+    "referenceId": "wd_test_100",
+    "paymentMethod": "bKash",
+    "accountNumber": "01700000000"
+  },
+  {
+    "id": "tx_dep_dep_1788886824540_1k8hk",
+    "createdAt": "2026-09-08T17:00:37.034Z",
+    "userId": "usr_test_101",
+    "type": "deposit",
+    "amount": 500,
+    "balanceBefore": 0,
+    "balanceAfter": 500,
+    "date": "৮ সেপ, ২০২৬, ০৫:০০ PM",
+    "status": "completed",
+    "description": "bKash ডিপোজিট অনুমোদিত (TrxID: BL72948293)",
+    "referenceId": "BL72948293",
+    "paymentMethod": "bKash",
+    "accountNumber": "01711223344"
+  }
+]

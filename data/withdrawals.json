@@ -1,0 +1,19 @@
+[
+  {
+    "id": "wd_test_100",
+    "userId": "test_usr_1",
+    "userName": "User",
+    "userPhone": "",
+    "amount": 100,
+    "fee": 0,
+    "netAmount": 100,
+    "paymentMethod": "bKash",
+    "accountNumber": "01700000000",
+    "accountName": "Test User",
+    "date": "২২/৯/২০২৬",
+    "status": "approved",
+    "createdAt": "2026-09-22T15:48:43.088Z",
+    "processed": true,
+    "approvedAt": "2026-09-22T15:48:48.916Z"
+  }
+]

@@ -1,0 +1,6 @@
+{
+	"appId": "com.goodlife.app",
+	"appName": "Good Life",
+	"webDir": "dist",
+	"bundledWebRuntime": false
+}

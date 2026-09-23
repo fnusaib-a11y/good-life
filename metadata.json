@@ -1,0 +1,8 @@
+{
+  "name": "Good Life",
+  "description": "A modern Bengali-first E-commerce, Reselling, Micro Job, Digital Services, Rewards \u0026 Referral Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
