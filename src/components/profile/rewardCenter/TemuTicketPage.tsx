@@ -5,7 +5,8 @@ import { TemuTicketItem, TemuTicketCampaign } from '../../../types/rewardCenter'
 import { 
   getUserTemuTickets, 
   saveUserTemuTicket, 
-  getRewardCenterSettings 
+  getRewardCenterSettings,
+  claimAndCreditReward
 } from '../../../services/rewardCenterService';
 import { Ticket, Sparkles, CheckCircle2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -86,6 +87,55 @@ export const TemuTicketPage: React.FC<TemuTicketPageProps> = ({ onBack }) => {
 
     try {
       const bonusAmount = Number(campaign.amount) || 0;
+      const res = await claimAndCreditReward({
+        userId: user.id,
+        userPhone: user.phone,
+        feature: 'temu_ticket',
+        rewardId: campaign.id,
+        rewardTitle: `টেমু টিকিট বোনাস: ${campaign.title}`,
+        amount: bonusAmount,
+        note: campaign.condition || 'অফিশিয়াল টেমু টিকিট উপহার'
+      });
+
+      if (!res.success) {
+        showToast(res.message || 'টিকিট দাবি ব্যর্থ হয়েছে!');
+        if (res.alreadyClaimed) {
+          setClaimedCampaignIds(prev => new Set(prev).add(campaign.id));
+        }
+        return;
+      }
+
+      const updatedBalance = res.wallet?.balance !== undefined
+        ? res.wallet.balance
+        : Math.round(((Number(wallet.balance) || 0) + bonusAmount) * 100) / 100;
+
+      // 1. Credit wallet
+      setWallet(prev => ({
+        ...prev,
+        balance: updatedBalance,
+        totalEarned: res.wallet?.totalEarned !== undefined
+          ? res.wallet.totalEarned
+          : Math.round(((Number(prev.totalEarned) || 0) + bonusAmount) * 100) / 100,
+        incomeBreakdown: {
+          ...prev.incomeBreakdown,
+          bonusIncome: Math.round(((Number(prev.incomeBreakdown?.bonusIncome) || 0) + bonusAmount) * 100) / 100
+        },
+        updatedAt: res.wallet?.updatedAt || new Date().toISOString()
+      }));
+
+      // 2. Add transaction
+      if (res.transaction) {
+        addTransaction(res.transaction);
+      } else {
+        addTransaction({
+          type: 'bonus',
+          amount: bonusAmount,
+          status: 'completed',
+          description: `টেমু টিকিট বোনাস: ${campaign.title}`,
+          paymentMethod: 'system'
+        });
+      }
+
       const newTicket: TemuTicketItem = {
         id: `ticket_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         campaignId: campaign.id,
@@ -96,22 +146,6 @@ export const TemuTicketPage: React.FC<TemuTicketPageProps> = ({ onBack }) => {
         date: formattedDate,
         status: 'completed'
       };
-
-      // 1. Credit wallet
-      setWallet(prev => ({
-        ...prev,
-        balance: Math.round(((Number(prev.balance) || 0) + bonusAmount) * 100) / 100,
-        totalEarned: Math.round(((Number(prev.totalEarned) || 0) + bonusAmount) * 100) / 100
-      }));
-
-      // 2. Add transaction
-      addTransaction({
-        type: 'bonus',
-        amount: bonusAmount,
-        status: 'completed',
-        description: `টেমু টিকিট বোনাস: ${campaign.title}`,
-        paymentMethod: 'system'
-      });
 
       // 3. Save ticket
       await saveUserTemuTicket(newTicket);

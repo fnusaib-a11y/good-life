@@ -1066,7 +1066,7 @@ app.get("/api/wallet/:userId", (req, res) => {
     if (wallet) {
       const deposits = loadDeposits();
       const userApprovedDeposits = deposits.filter(d => 
-        (d.status === 'approved' || d.status === 'completed') && 
+        (d.status === 'approved' || (d.status as any) === 'completed') && 
         (d.userId === userId || (normalizedPhone && (d.userPhone?.replace(/[^0-9]/g, "") === normalizedPhone || d.senderPhone?.replace(/[^0-9]/g, "") === normalizedPhone)))
       );
       const totalApprovedDepositAmount = userApprovedDeposits.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
@@ -1180,13 +1180,28 @@ app.post("/api/rewards/claim", (req, res) => {
     // Authoritative wallet credit
     const creditResult = creditUserWallet(cleanUid, userPhone, claimAmount, true);
 
+    // If client supplied the authoritative finalBalance from Firestore transaction, ensure wallet alignment
+    if (typeof req.body.finalBalance === 'number' && req.body.finalBalance >= creditResult.wallet.balance) {
+      creditResult.wallet.balance = req.body.finalBalance;
+      const wallets = loadWallets();
+      if (wallets[cleanUid]) {
+        wallets[cleanUid].balance = req.body.finalBalance;
+        wallets[cleanUid].updatedAt = new Date().toISOString();
+        saveWallets(wallets);
+      }
+    }
+
     // Record real transaction in persistent ledger
-    const txId = `tx_${cleanFeature}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const txId = req.body.txId || `tx_${cleanFeature}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const nowIso = new Date().toISOString();
     const tx = recordTransaction({
       id: txId,
       userId: cleanUid,
       type: 'bonus',
       amount: claimAmount,
+      balanceBefore: creditResult.balanceBefore,
+      balanceAfter: creditResult.wallet.balance,
+      date: nowIso,
       status: 'completed',
       description: note || `পুরস্কার সেন্টার: ${rewardTitle || cleanFeature} রিওয়ার্ড`,
       paymentMethod: 'system',
@@ -1195,14 +1210,14 @@ app.post("/api/rewards/claim", (req, res) => {
 
     // Save claim record
     const claimRecord = {
-      id: `claim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: req.body.claimId || `claim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       userId: cleanUid,
       userPhone: userPhone || '',
       feature: cleanFeature,
       rewardId: cleanRewardId,
       rewardTitle: rewardTitle || '',
       amount: claimAmount,
-      claimedAt: new Date().toISOString(),
+      claimedAt: nowIso,
       status: 'completed',
       note: note || '',
       txId
@@ -1210,9 +1225,9 @@ app.post("/api/rewards/claim", (req, res) => {
     claims.unshift(claimRecord);
     saveRewardClaims(claims);
 
-    // Broadcast SSE
-    broadcastSSE("wallet_updated", { userId: cleanUid, wallet: creditResult.wallet });
-    broadcastSSE("transaction_added", { transaction: tx });
+    // Broadcast realtime event
+    broadcastRealtimeEvent({ type: "wallet_updated", userId: cleanUid, wallet: creditResult.wallet });
+    broadcastRealtimeEvent({ type: "transaction_added", transaction: tx });
 
     console.log(`[Reward Center] Successfully credited ৳${claimAmount} to user ${cleanUid}. New Balance: ৳${creditResult.wallet.balance}`);
 

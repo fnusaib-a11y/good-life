@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../../context/AppContext';
 import { RewardCenterHeader } from './RewardCenterHeader';
 import { RewardCenterProfileBanner } from './RewardCenterProfileBanner';
-import { Copy, Share2, Users, CheckCircle, Clock, ShieldCheck, Gift } from 'lucide-react';
+import { getRewardCenterSettings } from '../../../services/rewardCenterService';
+import { InviteLinkConfig } from '../../../types/rewardCenter';
+import { Copy, Share2, Users, CheckCircle, Clock, ShieldCheck, Gift, AlertCircle, Lock } from 'lucide-react';
 
 interface InviteFriendsRewardPageProps {
   onBack: () => void;
@@ -12,11 +14,44 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
   const { user, wallet, registeredUsers, showToast } = useApp();
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [inviteConfig, setInviteConfig] = useState<InviteLinkConfig | null>(null);
+  const [inviteBonusAmount, setInviteBonusAmount] = useState<number>(10);
+  const [inviteTerms, setInviteTerms] = useState<string>('');
+  const [loadingConfig, setLoadingConfig] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    getRewardCenterSettings().then(s => {
+      if (!isMounted) return;
+      if (s?.inviteLinkConfig) {
+        setInviteConfig(s.inviteLinkConfig);
+      }
+      if (s?.inviteBonusAmount !== undefined) {
+        setInviteBonusAmount(s.inviteBonusAmount);
+      }
+      if (s?.inviteTerms) {
+        setInviteTerms(s.inviteTerms);
+      }
+      setLoadingConfig(false);
+    }).catch(() => {
+      if (isMounted) setLoadingConfig(false);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const referralCode = user?.referralCode || user?.phone || 'GL000000';
-  const inviteLink = typeof window !== 'undefined'
-    ? `${window.location.origin}/?ref=${referralCode}`
-    : `https://goodlife.app/?ref=${referralCode}`;
+  const isInviteEnabled = inviteConfig ? inviteConfig.enabled !== false : true;
+  
+  // Real Admin configured link strictly (no hardcoded demo link)
+  const linkTemplate = inviteConfig?.linkTemplate?.trim() || (typeof window !== 'undefined' ? `${window.location.origin}/?ref={code}` : 'https://goodlife.app/?ref={code}');
+  const inviteLink = isInviteEnabled
+    ? (linkTemplate.includes('{code}')
+        ? linkTemplate.replace(/\{code\}/g, referralCode)
+        : (linkTemplate.includes('?') ? `${linkTemplate}&ref=${referralCode}` : `${linkTemplate}?ref=${referralCode}`))
+    : '';
 
   // Filter real invited users matching logged in user's referralCode or phone
   const myInvitedUsers = (registeredUsers || []).filter(u => {
@@ -38,6 +73,10 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
   };
 
   const handleCopyLink = () => {
+    if (!isInviteEnabled) {
+      showToast('অ্যাডমিন কর্তৃক আমন্ত্রণ লিংক সাময়িকভাবে বন্ধ রাখা হয়েছে।');
+      return;
+    }
     navigator.clipboard?.writeText(inviteLink);
     setCopiedLink(true);
     showToast('আমন্ত্রণ লিংক ক্লিপবোর্ডে কপি করা হয়েছে!');
@@ -45,14 +84,19 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
   };
 
   const handleShare = async () => {
+    if (!isInviteEnabled) {
+      showToast('অ্যাডমিন কর্তৃক আমন্ত্রণ লিংক সাময়িকভাবে বন্ধ রাখা হয়েছে।');
+      return;
+    }
+    const shareMessage = inviteConfig?.shareMessage || 'Good Life প্ল্যাটফর্মে যোগ দিন এবং সাথে সাথে সাইন-আপ ও রিওয়ার্ড বোনাস গ্রহণ করুন!';
     if (navigator.share) {
       try {
         await navigator.share({
           title: 'Good Life মেম্বারশিপ আমন্ত্রণ',
-          text: `Good Life প্ল্যাটফর্মে যোগ দিন এবং সাথে সাথে সাইন-আপ বোনাস গ্রহণ করুন! আমার রেফারেল কোড: ${referralCode}`,
+          text: `${shareMessage} আমার রেফারেল কোড: ${referralCode}`,
           url: inviteLink
         });
-      } catch (err) {
+      } catch {
         // user cancelled or not supported
       }
     } else {
@@ -76,6 +120,13 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
       />
 
       <div className="p-3.5 space-y-3.5 max-w-lg mx-auto w-full">
+        {!isInviteEnabled && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-center gap-2.5 text-amber-900 text-xs font-semibold">
+            <Lock className="w-5 h-5 text-amber-600 shrink-0" />
+            <span>অ্যাডমিন কর্তৃক বন্ধুদের আমন্ত্রণ লিংক ফিচারটি সাময়িকভাবে বন্ধ রাখা হয়েছে।</span>
+          </div>
+        )}
+
         {/* Referral Code & Link Box */}
         <div className="bg-white rounded-2xl p-4 shadow-xs border border-gray-100 space-y-3">
           <div>
@@ -88,7 +139,7 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
               </span>
               <button
                 onClick={handleCopyCode}
-                className="px-3.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
+                className="px-3.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
               >
                 <Copy className="w-3.5 h-3.5" />
                 <span>{copiedCode ? 'কপি হয়েছে' : 'কপি করুন'}</span>
@@ -97,31 +148,46 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
           </div>
 
           <div>
-            <span className="text-[11px] font-bold text-gray-400 block uppercase tracking-wider">
-              আমন্ত্রণ লিংক
-            </span>
-            <div className="flex items-center gap-2 mt-1">
-              <input
-                type="text"
-                readOnly
-                value={inviteLink}
-                className="flex-1 bg-gray-50 rounded-xl px-3 py-2 text-xs text-gray-700 border border-gray-100 font-mono truncate"
-              />
-              <button
-                onClick={handleCopyLink}
-                className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition-all active:scale-95"
-                title="কপি লিংক"
-              >
-                <Copy className="w-4 h-4" />
-              </button>
-              <button
-                onClick={handleShare}
-                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs active:scale-95 transition-all"
-              >
-                <Share2 className="w-4 h-4" />
-                <span>শেয়ার</span>
-              </button>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                আমন্ত্রণ লিংক
+              </span>
+              {!isInviteEnabled && (
+                <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-full">
+                  নিষ্ক্রিয়
+                </span>
+              )}
             </div>
+
+            {isInviteEnabled ? (
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="text"
+                  readOnly
+                  value={inviteLink}
+                  className="flex-1 bg-gray-50 rounded-xl px-3 py-2 text-xs text-gray-700 border border-gray-100 font-mono truncate"
+                />
+                <button
+                  onClick={handleCopyLink}
+                  className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition-all active:scale-95 cursor-pointer"
+                  title="কপি লিংক"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleShare}
+                  className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs active:scale-95 transition-all cursor-pointer"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>শেয়ার</span>
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 bg-gray-50 rounded-xl p-3 text-xs text-gray-400 font-medium border border-gray-100 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-gray-400" />
+                <span>আমন্ত্রণ লিংক বর্তমানে অ্যাডমিন দ্বারা স্থগিত রয়েছে</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -206,6 +272,29 @@ export const InviteFriendsRewardPage: React.FC<InviteFriendsRewardPageProps> = (
             )}
           </div>
         </div>
+
+        {/* Bonus & Rules Card */}
+        {inviteTerms ? (
+          <div className="bg-white rounded-2xl p-4 shadow-xs border border-gray-100 space-y-2">
+            <h4 className="font-bold text-gray-800 flex items-center gap-1.5 text-xs">
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <span>আমন্ত্রণ নিয়ম ও শর্তাবলী</span>
+            </h4>
+            <p className="whitespace-pre-line text-gray-500 text-[11px] leading-relaxed">
+              {inviteTerms}
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl p-4 shadow-xs border border-gray-100 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+              <Gift className="w-5 h-5" />
+            </div>
+            <div className="text-xs">
+              <span className="font-bold text-gray-800 block">প্রতি সফল আমন্ত্রণে ৳{inviteBonusAmount.toFixed(2)} বোনাস</span>
+              <span className="text-[11px] text-gray-500 block">বন্ধু অ্যাকাউন্ট খুলে ভেরিফাই করলে আপনার ওয়ালেটে রেফারেল বোনাস জমা হবে।</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -10,7 +10,8 @@ import {
   deleteDoc,
   query,
   where,
-  limit
+  limit,
+  runTransaction
 } from 'firebase/firestore';
 import { db, ensureFirebaseAuth } from './firebase';
 import { 
@@ -44,15 +45,42 @@ const fetchWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number = 3000
 };
 
 /**
- * Synchronize User profile & Wallet with Firestore
+ * Synchronize User profile & Wallet with Firestore.
+ * Strictly guarantees that a valid positive balance in Firestore is NEVER overwritten with 0.
  */
 export async function syncUserWithFirestore(user: UserProfile, wallet: WalletState, password?: string) {
   if (!user || !user.id) return;
   try {
     const userRef = doc(db, 'users', user.id);
+    let finalWallet: WalletState = { ...wallet };
+
+    // Safety guard: Never overwrite positive balance in cloud with 0
+    try {
+      const snap = await fetchWithTimeout(getDoc(userRef), 2000);
+      if (snap.exists()) {
+        const cloudData = snap.data();
+        const cloudBal = Number(cloudData.wallet?.balance ?? cloudData.balance) || 0;
+        const incomingBal = Number(wallet?.balance) || 0;
+        if (cloudBal > 0 && incomingBal === 0) {
+          finalWallet = {
+            ...wallet,
+            balance: cloudBal,
+            totalEarned: Math.max(Number(wallet?.totalEarned) || 0, Number(cloudData.wallet?.totalEarned ?? cloudData.totalEarned) || 0),
+            incomeBreakdown: {
+              ...(cloudData.wallet?.incomeBreakdown || {}),
+              ...(wallet?.incomeBreakdown || {})
+            }
+          };
+        }
+      }
+    } catch {
+      // offline / timeout, continue with payload
+    }
+
     const payload: any = {
       ...user,
-      wallet,
+      balance: finalWallet.balance,
+      wallet: finalWallet,
       updatedAt: new Date().toISOString()
     };
     if (password) {
@@ -61,6 +89,128 @@ export async function syncUserWithFirestore(user: UserProfile, wallet: WalletSta
     await setDoc(userRef, payload, { merge: true });
   } catch (error) {
     console.warn('Firestore user sync fallback (offline or pending rules):', error);
+  }
+}
+
+/**
+ * Authoritatively credits an approved deposit to user balance in Firestore using runTransaction.
+ * Strictly prevents duplicate credits by verifying processed_deposits subcollection.
+ */
+export async function creditUserDepositInFirestore(deposit: DepositRequest): Promise<{
+  success: boolean;
+  alreadyCredited?: boolean;
+  newBalance: number;
+  txId?: string;
+}> {
+  if (!deposit || !deposit.id || !deposit.userId || !deposit.amount) {
+    return { success: false, newBalance: 0 };
+  }
+
+  const cleanUid = String(deposit.userId).trim();
+  const cleanDepId = String(deposit.id).trim();
+  const depositAmount = Number(deposit.amount) || 0;
+  let finalBalance = 0;
+
+  try {
+    await ensureFirebaseAuth();
+
+    const processedRef = doc(db, 'users', cleanUid, 'processed_deposits', cleanDepId);
+    const userDocRef = doc(db, 'users', cleanUid);
+    const depDocRef = doc(db, 'deposits', cleanDepId);
+
+    const createdTxId = `tx_dep_${cleanDepId}`;
+
+    await runTransaction(db, async (transaction) => {
+      // 1. Transactional duplicate check
+      const procSnap = await transaction.get(processedRef);
+      if (procSnap.exists()) {
+        const existingData = procSnap.data();
+        finalBalance = Number(existingData.finalBalance) || 0;
+        throw new Error('DEPOSIT_ALREADY_CREDITED');
+      }
+
+      // 2. Read existing user document in Firestore
+      const userSnap = await transaction.get(userDocRef);
+      let currentBalance = 0;
+      let existingData: any = {};
+
+      if (userSnap.exists()) {
+        existingData = userSnap.data() || {};
+        currentBalance = typeof existingData.wallet?.balance === 'number'
+          ? existingData.wallet.balance
+          : (typeof existingData.balance === 'number' ? existingData.balance : 0);
+      }
+
+      finalBalance = Math.round((currentBalance + depositAmount) * 100) / 100;
+      const nowIso = new Date().toISOString();
+
+      const updatedWallet: WalletState = {
+        ...(existingData.wallet || {
+          totalEarned: 0,
+          totalWithdrawn: 0,
+          incomeBreakdown: { jobIncome: 0, referralIncome: 0, resellingProfit: 0, bonusIncome: 0, affiliateIncome: 0, adsIncome: 0, otherIncome: 0 }
+        }),
+        balance: finalBalance,
+        updatedAt: nowIso
+      };
+
+      const txRecord: Transaction = {
+        id: createdTxId,
+        userId: cleanUid,
+        type: 'deposit',
+        amount: depositAmount,
+        balanceBefore: currentBalance,
+        balanceAfter: finalBalance,
+        date: nowIso,
+        createdAt: nowIso,
+        status: 'completed',
+        description: `${deposit.paymentMethod || 'ডিপোজিট'} অনুমোদিত (TrxID: ${deposit.trxId || cleanDepId})`,
+        paymentMethod: deposit.paymentMethod || 'manual',
+        referenceId: deposit.trxId || cleanDepId
+      };
+
+      // 3. Mark processed deposit record to block future double credits
+      transaction.set(processedRef, {
+        depositId: cleanDepId,
+        amount: depositAmount,
+        creditedAt: nowIso,
+        finalBalance
+      });
+
+      // 4. Update user document with authoritative new balance
+      transaction.set(userDocRef, {
+        ...existingData,
+        balance: finalBalance,
+        wallet: updatedWallet,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      // 5. Save user transaction in user subcollection and root transactions
+      const userTxRef = doc(db, 'users', cleanUid, 'transactions', createdTxId);
+      transaction.set(userTxRef, txRecord);
+      const rootTxRef = doc(db, 'transactions', createdTxId);
+      transaction.set(rootTxRef, txRecord);
+
+      // 6. Update deposit request status in Firestore
+      transaction.set(depDocRef, {
+        ...deposit,
+        status: 'approved',
+        updatedAt: nowIso,
+        approvedAt: nowIso
+      }, { merge: true });
+    });
+
+    return {
+      success: true,
+      newBalance: finalBalance,
+      txId: createdTxId
+    };
+  } catch (err: any) {
+    if (err?.message?.includes('DEPOSIT_ALREADY_CREDITED')) {
+      return { success: true, alreadyCredited: true, newBalance: finalBalance };
+    }
+    console.warn('creditUserDepositInFirestore error/offline:', err);
+    return { success: false, newBalance: 0 };
   }
 }
 

@@ -582,8 +582,10 @@ export function aggregateUserTransactions(options: TransactionAggregationOptions
 
   // Balance edge case calculation:
   // Calculated net balance = (Total Deposits + Total Earnings) - (Total Withdrawals + Total Expenses)
-  const calculatedNet = Math.round(((totalDeposits + totalIncome) - (totalWithdrawn + totalExpenses)) * 100) / 100;
-  const currentBalance = Number(wallet?.balance ?? (user as any)?.balance ?? calculatedNet);
+  const calculatedNet = Math.max(0, Math.round(((totalDeposits + totalIncome) - (totalWithdrawn + totalExpenses)) * 100) / 100);
+  const rawBal = Number(wallet?.balance ?? (user as any)?.balance);
+  // Guarantee: Valid funds from deposits, earnings, and transactions are never suppressed by 0
+  const currentBalance = (rawBal > 0) ? rawBal : (calculatedNet > 0 ? calculatedNet : (rawBal || 0));
 
   const refDate = referenceDateUtc ? new Date(referenceDateUtc) : new Date();
 

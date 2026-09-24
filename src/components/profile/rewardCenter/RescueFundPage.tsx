@@ -74,43 +74,56 @@ export const RescueFundPage: React.FC<RescueFundPageProps> = ({ onBack }) => {
 
     try {
       const amount = Number(campaign.rewardAmount) || 0;
-      const uniqueTxId = `tx_rescue_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const nowIso = new Date().toISOString();
-
-      // 1. Credit wallet
-      setWallet(prev => ({
-        ...prev,
-        balance: Math.round(((Number(prev.balance) || 0) + amount) * 100) / 100,
-        totalEarned: Math.round(((Number(prev.totalEarned) || 0) + amount) * 100) / 100,
-        incomeBreakdown: {
-          ...prev.incomeBreakdown,
-          bonusIncome: Math.round(((Number(prev.incomeBreakdown?.bonusIncome) || 0) + amount) * 100) / 100
-        }
-      }));
-
-      // 2. Add Transaction
-      addTransaction({
-        type: 'bonus',
-        amount: amount,
-        status: 'completed',
-        description: `উদ্ধার তহবিল সহায়তা: ${campaign.name}`,
-        paymentMethod: 'system'
-      });
-
-      // 3. Persist claim
-      const claimRecord: RewardClaimRecord = {
-        id: uniqueTxId,
+      const res = await claimAndCreditReward({
         userId: user.id,
+        userPhone: user.phone,
         feature: 'rescue_fund',
         rewardId: campaign.id,
         rewardTitle: campaign.name,
         amount: amount,
-        claimedAt: nowIso,
-        status: 'completed'
-      };
-      await recordRewardClaim(claimRecord);
+        note: `উদ্ধার তহবিল সহায়তা: ${campaign.name}`
+      });
 
-      // 4. Update local state
+      if (!res.success) {
+        showToast(res.message || 'তহবিল দাবি ব্যর্থ হয়েছে।');
+        if (res.alreadyClaimed) {
+          setClaimedCampaignIds(prev => new Set([...prev, campaign.id]));
+        }
+        return;
+      }
+
+      // 1. Credit wallet with authoritative balance
+      const updatedBalance = res.wallet?.balance !== undefined
+        ? res.wallet.balance
+        : Math.round(((Number(wallet.balance) || 0) + amount) * 100) / 100;
+
+      setWallet(prev => ({
+        ...prev,
+        balance: updatedBalance,
+        totalEarned: res.wallet?.totalEarned !== undefined
+          ? res.wallet.totalEarned
+          : Math.round(((Number(prev.totalEarned) || 0) + amount) * 100) / 100,
+        incomeBreakdown: {
+          ...prev.incomeBreakdown,
+          bonusIncome: Math.round(((Number(prev.incomeBreakdown?.bonusIncome) || 0) + amount) * 100) / 100
+        },
+        updatedAt: res.wallet?.updatedAt || new Date().toISOString()
+      }));
+
+      // 2. Add Transaction
+      if (res.transaction) {
+        addTransaction(res.transaction);
+      } else {
+        addTransaction({
+          type: 'bonus',
+          amount: amount,
+          status: 'completed',
+          description: `উদ্ধার তহবিল সহায়তা: ${campaign.name}`,
+          paymentMethod: 'system'
+        });
+      }
+
+      // 3. Update local state
       setClaimedCampaignIds(prev => new Set([...prev, campaign.id]));
       showToast(`অভিনন্দন! উদ্ধার তহবিল বাবদ ৳${amount.toFixed(2)} আপনার ওয়ালেটে জমা হয়েছে।`);
     } catch (err) {

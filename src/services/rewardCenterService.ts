@@ -10,7 +10,7 @@ import {
   RewardCenterSystemSettings
 } from '../types/rewardCenter';
 import { db, ensureFirebaseAuth } from '../lib/firebase';
-import { doc, getDoc, setDoc, collection, getDocs, query, where, addDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, query, where, runTransaction } from 'firebase/firestore';
 
 const STORAGE_KEY_SETTINGS = 'lg_reward_center_settings';
 const STORAGE_KEY_CLAIMS_PREFIX = 'lg_reward_claims_';
@@ -235,6 +235,16 @@ export async function getUserClaimRecords(userId: string): Promise<RewardClaimRe
 }
 
 /**
+ * Generate a canonical, unique document ID for a claim in Firestore
+ */
+export function getCanonicalClaimDocId(userId: string, feature: string, rewardId: string): string {
+  const cleanUid = String(userId || '').trim();
+  const cleanFeature = String(feature || 'reward').trim().toLowerCase();
+  const cleanRewardId = String(rewardId || '').trim();
+  return `claim_${cleanUid}_${cleanFeature}_${cleanRewardId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/**
  * Record a successful reward claim in Firestore & LocalStorage
  */
 export async function recordRewardClaim(record: RewardClaimRecord): Promise<void> {
@@ -243,16 +253,133 @@ export async function recordRewardClaim(record: RewardClaimRecord): Promise<void
   try {
     const raw = localStorage.getItem(localKey);
     const list: RewardClaimRecord[] = raw ? JSON.parse(raw) : [];
-    list.unshift(record);
-    localStorage.setItem(localKey, JSON.stringify(list));
+    // Filter out duplicates in local cache
+    const filtered = list.filter(c => 
+      c.id !== record.id && 
+      !(c.feature === record.feature && String(c.rewardId).trim().toUpperCase() === String(record.rewardId).trim().toUpperCase())
+    );
+    filtered.unshift(record);
+    localStorage.setItem(localKey, JSON.stringify(filtered));
   } catch (e) {}
 
   try {
     await ensureFirebaseAuth();
     const docRef = doc(db, 'reward_claims', record.id);
-    await setDoc(docRef, record);
+    await setDoc(docRef, record, { merge: true });
+
+    // Also persist in user's isolated claimed_rewards subcollection
+    const userClaimRef = doc(db, 'users', record.userId, 'claimed_rewards', record.id);
+    await setDoc(userClaimRef, record, { merge: true });
   } catch (err) {
     console.warn('Firestore record claim fallback:', err);
+  }
+}
+
+/**
+ * Verify whether a reward claim is strictly unique in Firestore for a given user.
+ * Checks direct document existence in global 'reward_claims' and user's 'claimed_rewards' subcollection,
+ * as well as querying collection records to ensure duplicate rewards are strictly blocked.
+ */
+export async function verifyUniqueRewardClaimInFirestore(
+  userId: string,
+  feature: string,
+  rewardId: string
+): Promise<{ isUnique: boolean; existingRecord?: RewardClaimRecord }> {
+  if (!userId || !feature || !rewardId) {
+    return { isUnique: false };
+  }
+
+  const cleanUid = String(userId).trim();
+  const cleanFeature = String(feature).trim().toLowerCase();
+  const cleanRewardId = String(rewardId).trim();
+  const canonicalDocId = getCanonicalClaimDocId(cleanUid, cleanFeature, cleanRewardId);
+
+  // 1. Fast local cache verification to block immediate repeated attempts
+  const localKey = `${STORAGE_KEY_CLAIMS_PREFIX}${cleanUid}`;
+  try {
+    const raw = localStorage.getItem(localKey);
+    if (raw) {
+      const list: RewardClaimRecord[] = JSON.parse(raw);
+      const match = list.find(c =>
+        c.feature === cleanFeature &&
+        String(c.rewardId).trim().toUpperCase() === cleanRewardId.toUpperCase()
+      );
+      if (match) {
+        return { isUnique: false, existingRecord: match };
+      }
+    }
+  } catch {}
+
+  // 2. Authoritative Firestore verification
+  try {
+    await ensureFirebaseAuth();
+
+    // A. Check canonical unique document in 'reward_claims'
+    const claimDocRef = doc(db, 'reward_claims', canonicalDocId);
+    const directSnap = await getDoc(claimDocRef);
+    if (directSnap.exists()) {
+      return { isUnique: false, existingRecord: { id: directSnap.id, ...directSnap.data() } as RewardClaimRecord };
+    }
+
+    // B. Check canonical unique document in 'users/{userId}/claimed_rewards'
+    const userClaimDocRef = doc(db, 'users', cleanUid, 'claimed_rewards', canonicalDocId);
+    const userClaimSnap = await getDoc(userClaimDocRef);
+    if (userClaimSnap.exists()) {
+      return { isUnique: false, existingRecord: { id: userClaimSnap.id, ...userClaimSnap.data() } as RewardClaimRecord };
+    }
+
+    // C. Query 'reward_claims' by userId & feature to catch records with legacy or generated IDs
+    const q = query(
+      collection(db, 'reward_claims'),
+      where('userId', '==', cleanUid),
+      where('feature', '==', cleanFeature)
+    );
+    const querySnap = await getDocs(q);
+    for (const d of querySnap.docs) {
+      const data = d.data() as RewardClaimRecord;
+      if (
+        data.rewardId &&
+        String(data.rewardId).trim().toUpperCase() === cleanRewardId.toUpperCase()
+      ) {
+        return { isUnique: false, existingRecord: { id: d.id, ...data } };
+      }
+    }
+
+    // D. Query user's claimed_rewards subcollection
+    try {
+      const userClaimsCol = collection(db, 'users', cleanUid, 'claimed_rewards');
+      const userSnap = await getDocs(userClaimsCol);
+      for (const d of userSnap.docs) {
+        const data = d.data() as RewardClaimRecord;
+        if (
+          data.feature === cleanFeature &&
+          data.rewardId &&
+          String(data.rewardId).trim().toUpperCase() === cleanRewardId.toUpperCase()
+        ) {
+          return { isUnique: false, existingRecord: { id: d.id, ...data } };
+        }
+      }
+    } catch {}
+
+    return { isUnique: true };
+  } catch (err) {
+    console.warn('Firestore claim status verification warning:', err);
+    // If Firestore is temporarily unreachable, check local cache again
+    try {
+      const raw = localStorage.getItem(localKey);
+      if (raw) {
+        const list: RewardClaimRecord[] = JSON.parse(raw);
+        const match = list.find(c =>
+          c.feature === cleanFeature &&
+          String(c.rewardId).trim().toUpperCase() === cleanRewardId.toUpperCase()
+        );
+        if (match) {
+          return { isUnique: false, existingRecord: match };
+        }
+      }
+    } catch {}
+
+    return { isUnique: true };
   }
 }
 
@@ -387,94 +514,292 @@ export interface ClaimRewardResult {
 
 /**
  * Authoritatively Claim & Credit a Reward
- * 1. Checks duplicate claim
- * 2. Credits balance on persistent server
- * 3. Records real transaction
- * 4. Records claim in Firestore
- * 5. Returns updated authoritative data
+ * 1. Verifies unique claim status in Firestore (blocking duplicate rewards)
+ * 2. Executes a single-transaction update in Firestore that:
+ *    - Atomically guards against duplicate claims via transactional read
+ *    - Credits the user's balance and totalEarned on the user document
+ *    - Records the unique claim document in Firestore
+ *    - Records the audit transaction in Firestore
+ * 3. Updates local storage caches
+ * 4. Syncs with backend server for real-time SSE broadcasts & persistence
+ * 5. Returns updated balance and records
  */
 export async function claimAndCreditReward(options: ClaimRewardRequestOptions): Promise<ClaimRewardResult> {
   const { userId, userPhone, feature, rewardId, rewardTitle, amount, note } = options;
   if (!userId) {
     return { success: false, message: 'অনুগ্রহ করে প্রথমে লগইন করুন।' };
   }
-  if (amount <= 0) {
+  const claimAmount = Number(amount) || 0;
+  if (claimAmount <= 0) {
     return { success: false, message: 'রিওয়ার্ডের পরিমাণ সঠিক নয়।' };
   }
 
-  // 1. Check local cache / existing claims first to fast-fail duplicate
+  const cleanUid = String(userId).trim();
+  const cleanFeature = String(feature || 'reward').trim().toLowerCase();
+  const cleanRewardId = String(rewardId || '').trim();
+  const canonicalDocId = getCanonicalClaimDocId(cleanUid, cleanFeature, cleanRewardId);
+
+  // STEP 1: Verify unique claim status in Firestore before executing transaction
+  const verification = await verifyUniqueRewardClaimInFirestore(cleanUid, cleanFeature, cleanRewardId);
+  if (!verification.isUnique) {
+    return {
+      success: false,
+      alreadyClaimed: true,
+      message: 'আপনি ইতিমধ্যেই এই পুরস্কারটি গ্রহণ করেছেন!'
+    };
+  }
+
+  const txId = `tx_${cleanFeature}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const nowIso = new Date().toISOString();
+
+  let updatedWallet: any = null;
+  let txRecord: any = null;
+  let claimRecord: RewardClaimRecord = {
+    id: canonicalDocId,
+    userId: cleanUid,
+    userPhone: userPhone || '',
+    feature: cleanFeature as any,
+    rewardId: cleanRewardId,
+    rewardTitle: rewardTitle || '',
+    amount: claimAmount,
+    claimedAt: nowIso,
+    status: 'completed',
+    note: note || '',
+    txId
+  };
+
+  // STEP 2: Execute single-transaction update in Firestore
+  let transactionCommitted = false;
   try {
-    const existingClaims = await getUserClaimRecords(userId);
-    const isDuplicate = existingClaims.some(c => 
-      c.feature === feature && 
-      String(c.rewardId).toUpperCase() === String(rewardId).toUpperCase()
-    );
-    if (isDuplicate) {
+    await ensureFirebaseAuth();
+
+    await runTransaction(db, async (transaction) => {
+      // 1. Transactional unique check on claim doc
+      const claimDocRef = doc(db, 'reward_claims', canonicalDocId);
+      const claimSnap = await transaction.get(claimDocRef);
+      if (claimSnap.exists()) {
+        throw new Error('DUPLICATE_CLAIM_BLOCKED');
+      }
+
+      const userClaimDocRef = doc(db, 'users', cleanUid, 'claimed_rewards', canonicalDocId);
+      const userClaimSnap = await transaction.get(userClaimDocRef);
+      if (userClaimSnap.exists()) {
+        throw new Error('DUPLICATE_CLAIM_BLOCKED');
+      }
+
+      // 2. Read user doc in Firestore to get authoritative balance
+      const userDocRef = doc(db, 'users', cleanUid);
+      const userSnap = await transaction.get(userDocRef);
+
+      let currentBalance = 0;
+      let currentTotalEarned = 0;
+      let currentBonusIncome = 0;
+      let existingUserData: any = {};
+
+      if (userSnap.exists()) {
+        existingUserData = userSnap.data() || {};
+        currentBalance = typeof existingUserData.balance === 'number'
+          ? existingUserData.balance
+          : (Number(existingUserData.wallet?.balance) || 0);
+        currentTotalEarned = typeof existingUserData.wallet?.totalEarned === 'number'
+          ? existingUserData.wallet.totalEarned
+          : (Number(existingUserData.totalEarned) || 0);
+        currentBonusIncome = Number(existingUserData.wallet?.incomeBreakdown?.bonusIncome) || 0;
+      } else {
+        // Fallback to local storage if user doc not in Firestore yet
+        try {
+          const localStr = localStorage.getItem(`lg_wallet_${cleanUid}`) || localStorage.getItem('lg_wallet');
+          if (localStr) {
+            const parsed = JSON.parse(localStr);
+            currentBalance = Number(parsed.balance) || 0;
+            currentTotalEarned = Number(parsed.totalEarned) || 0;
+            currentBonusIncome = Number(parsed.incomeBreakdown?.bonusIncome) || 0;
+          }
+        } catch {}
+      }
+
+      const newBalance = Math.round((currentBalance + claimAmount) * 100) / 100;
+      const newTotalEarned = Math.round((currentTotalEarned + claimAmount) * 100) / 100;
+      const newBonusIncome = Math.round((currentBonusIncome + claimAmount) * 100) / 100;
+
+      updatedWallet = {
+        ...(existingUserData.wallet || {}),
+        balance: newBalance,
+        totalEarned: newTotalEarned,
+        incomeBreakdown: {
+          ...(existingUserData.wallet?.incomeBreakdown || {}),
+          bonusIncome: newBonusIncome
+        },
+        updatedAt: nowIso
+      };
+
+      claimRecord = {
+        ...claimRecord,
+        userPhone: userPhone || existingUserData.phone || ''
+      };
+
+      txRecord = {
+        id: txId,
+        userId: cleanUid,
+        type: 'bonus',
+        amount: claimAmount,
+        balanceBefore: currentBalance,
+        balanceAfter: newBalance,
+        date: nowIso,
+        status: 'completed',
+        description: note || `পুরস্কার সেন্টার: ${rewardTitle || cleanFeature} রিওয়ার্ড`,
+        paymentMethod: 'system',
+        referenceId: cleanRewardId,
+        createdAt: nowIso,
+        credited: true
+      };
+
+      // 3. Atomic writes within single Firestore transaction:
+      // a. Mark unique claim record in global collection and user subcollection
+      transaction.set(claimDocRef, claimRecord);
+      transaction.set(userClaimDocRef, claimRecord);
+
+      // b. Credit user balance & wallet on user document in Firestore
+      transaction.set(userDocRef, {
+        ...existingUserData,
+        balance: newBalance,
+        totalEarned: newTotalEarned,
+        wallet: updatedWallet,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      // c. Record transaction in Firestore
+      const userTxRef = doc(db, 'users', cleanUid, 'transactions', txId);
+      transaction.set(userTxRef, txRecord);
+      const rootTxRef = doc(db, 'transactions', txId);
+      transaction.set(rootTxRef, txRecord);
+    });
+
+    transactionCommitted = true;
+  } catch (err: any) {
+    if (err?.message?.includes('DUPLICATE_CLAIM_BLOCKED')) {
       return {
         success: false,
         alreadyClaimed: true,
         message: 'আপনি ইতিমধ্যেই এই পুরস্কারটি গ্রহণ করেছেন!'
       };
     }
-  } catch (err) {
-    console.warn('Error reading claim records:', err);
+    console.warn('Firestore transaction fallback/offline note:', err);
   }
 
-  // 2. Call authoritative backend API to credit wallet and record persistent transaction
-  let serverResult: any = null;
+  // STEP 3: Fallback calculation if offline and transaction couldn't finish
+  if (!updatedWallet) {
+    let curBal = 0;
+    let curEarned = 0;
+    let curBonus = 0;
+    try {
+      const localStr = localStorage.getItem(`lg_wallet_${cleanUid}`) || localStorage.getItem('lg_wallet');
+      if (localStr) {
+        const parsed = JSON.parse(localStr);
+        curBal = Number(parsed.balance) || 0;
+        curEarned = Number(parsed.totalEarned) || 0;
+        curBonus = Number(parsed.incomeBreakdown?.bonusIncome) || 0;
+      }
+    } catch {}
+
+    const newBal = Math.round((curBal + claimAmount) * 100) / 100;
+    const newEarned = Math.round((curEarned + claimAmount) * 100) / 100;
+    const newBonus = Math.round((curBonus + claimAmount) * 100) / 100;
+
+    updatedWallet = {
+      balance: newBal,
+      totalEarned: newEarned,
+      totalWithdrawn: 0,
+      incomeBreakdown: {
+        jobIncome: 0,
+        referralIncome: 0,
+        resellingProfit: 0,
+        bonusIncome: newBonus,
+        affiliateIncome: 0,
+        adsIncome: 0,
+        otherIncome: 0
+      },
+      updatedAt: nowIso
+    };
+
+    txRecord = {
+      id: txId,
+      userId: cleanUid,
+      type: 'bonus',
+      amount: claimAmount,
+      balanceBefore: curBal,
+      balanceAfter: newBal,
+      date: nowIso,
+      status: 'completed',
+      description: note || `পুরস্কার সেন্টার: ${rewardTitle || cleanFeature} রিওয়ার্ড`,
+      paymentMethod: 'system',
+      referenceId: cleanRewardId,
+      createdAt: nowIso,
+      credited: true
+    };
+  }
+
+  // STEP 4: Update localStorage caches so UI immediately displays credited balance
+  try {
+    const localClaimsKey = `${STORAGE_KEY_CLAIMS_PREFIX}${cleanUid}`;
+    const raw = localStorage.getItem(localClaimsKey);
+    const list: RewardClaimRecord[] = raw ? JSON.parse(raw) : [];
+    const exists = list.some(c => 
+      c.feature === cleanFeature && 
+      String(c.rewardId).trim().toUpperCase() === cleanRewardId.toUpperCase()
+    );
+    if (!exists) {
+      list.unshift(claimRecord);
+      localStorage.setItem(localClaimsKey, JSON.stringify(list));
+    }
+  } catch (e) {}
+
+  try {
+    localStorage.setItem(`lg_wallet_${cleanUid}`, JSON.stringify(updatedWallet));
+    localStorage.setItem('lg_wallet', JSON.stringify(updatedWallet));
+  } catch (e) {}
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('goodlife:wallet_updated', {
+      detail: {
+        wallet: updatedWallet,
+        transaction: txRecord
+      }
+    }));
+  }
+
+  // STEP 5: Notify Express server backend so server JSON files and real-time SSE broadcasts are in sync
   try {
     const res = await fetch('/api/rewards/claim', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        userId,
+        userId: cleanUid,
         userPhone,
-        feature,
-        rewardId,
+        feature: cleanFeature,
+        rewardId: cleanRewardId,
         rewardTitle,
-        amount,
-        note
+        amount: claimAmount,
+        note,
+        txId,
+        claimId: canonicalDocId,
+        finalBalance: updatedWallet.balance
       })
     });
-    serverResult = await res.json();
-    if (!res.ok || !serverResult.success) {
-      if (serverResult?.alreadyClaimed) {
-        return { success: false, alreadyClaimed: true, message: serverResult.message || 'ইতিমধ্যেই গ্রহণ করা হয়েছে!' };
-      }
-      if (serverResult?.message) {
-        return { success: false, message: serverResult.message };
+    const serverResult = await res.json();
+    if (serverResult?.success && serverResult.wallet) {
+      if (typeof serverResult.wallet.balance === 'number') {
+        updatedWallet.balance = serverResult.wallet.balance;
       }
     }
-  } catch (err) {
-    console.warn('Backend reward claim API warning (proceeding with fallback):', err);
-  }
-
-  const claimId = serverResult?.claim?.id || `claim_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const nowIso = new Date().toISOString();
-
-  // 3. Persist claim in Firestore
-  const claimRecord: RewardClaimRecord = {
-    id: claimId,
-    userId,
-    feature,
-    rewardId,
-    rewardTitle,
-    amount,
-    claimedAt: nowIso,
-    status: 'completed',
-    note: note || ''
-  };
-
-  try {
-    await recordRewardClaim(claimRecord);
-  } catch (e) {
-    console.warn('Firestore claim record warning:', e);
+  } catch (serverErr) {
+    console.warn('Backend server reward sync note:', serverErr);
   }
 
   return {
     success: true,
-    wallet: serverResult?.wallet,
-    transaction: serverResult?.transaction,
+    wallet: updatedWallet,
+    transaction: txRecord,
     claimRecord
   };
 }

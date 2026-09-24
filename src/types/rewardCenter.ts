@@ -117,6 +117,7 @@ export interface TemuTicketItem {
 export interface RewardClaimRecord {
   id: string; // unique transaction/claim ID
   userId: string;
+  userPhone?: string;
   feature: 'claim' | 'signin' | 'rescue_fund' | 'invite' | 'promo' | 'temu_ticket';
   rewardId: string;
   rewardTitle: string;
@@ -124,6 +125,7 @@ export interface RewardClaimRecord {
   claimedAt: string;
   status: 'completed';
   note?: string;
+  txId?: string;
 }
 
 export interface InviteLinkConfig {
@@ -150,4 +152,5 @@ export interface RewardCenterSystemSettings {
   inviteBonusAmount: number;
   inviteTerms: string;
   inviteLinkConfig?: InviteLinkConfig;
+  telegramChannelUrl?: string;
 }

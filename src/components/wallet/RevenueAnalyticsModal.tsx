@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   TrendingUp, 
@@ -21,8 +21,10 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useApp } from '../../context/AppContext';
+import { safeSetItem } from '../../lib/storageUtils';
 import { 
   calculateRevenueAnalytics, 
+  aggregateUserTransactions,
   getPeriodDetail, 
   PeriodDetail 
 } from '../../lib/revenueAnalytics';
@@ -33,6 +35,7 @@ export const RevenueAnalyticsModal: React.FC = () => {
     setIsRevenueOpen, 
     isBn, 
     wallet, 
+    setWallet,
     transactions, 
     user,
     setLanguage, 
@@ -49,19 +52,26 @@ export const RevenueAnalyticsModal: React.FC = () => {
     return calculateRevenueAnalytics(transactions, wallet, user);
   }, [transactions, wallet, user]);
 
+  const aggReport = useMemo(() => {
+    return aggregateUserTransactions({ transactions, user, wallet });
+  }, [transactions, wallet, user]);
+
   // Selected period details
   const currentPeriodDetail = useMemo<PeriodDetail | null>(() => {
     if (!selectedPeriodKey) return null;
     return getPeriodDetail(selectedPeriodKey, transactions, wallet, user);
   }, [selectedPeriodKey, transactions, wallet, user]);
 
-  if (!isRevenueOpen) return null;
-
   const rawBal = Number(wallet?.balance ?? 0);
   const userBal = Number(user?.balance ?? 0);
-  const netBal = Number(stats?.balance?.calculatedNet ?? 0);
-  // Ensure valid funds are never shown as 0
-  const balanceNumber = rawBal > 0 ? rawBal : (userBal > 0 ? userBal : (netBal > 0 ? netBal : 0));
+  const netBal = Number(aggReport?.balance?.calculatedNet ?? 0);
+  const currentBal = Number(aggReport?.balance?.current ?? 0);
+  // Ensure valid funds from Real Deposit/Earning/Reward/Transaction are never shown as 0
+  const balanceNumber = rawBal > 0 
+    ? rawBal 
+    : (userBal > 0 
+      ? userBal 
+      : (currentBal > 0 ? currentBal : (netBal > 0 ? netBal : 0)));
   const balance = balanceNumber.toFixed(2) + "৳";
   const toggleLanguage = () => setLanguage(isBn ? 'en' : 'bn');
 
@@ -85,6 +95,8 @@ export const RevenueAnalyticsModal: React.FC = () => {
       });
     }
   }, [balanceNumber, wallet?.balance, user?.id]);
+
+  if (!isRevenueOpen) return null;
 
   const menuItems = [
     { 

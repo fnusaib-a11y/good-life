@@ -73,7 +73,9 @@ import {
   isFakeOrDummyNotification,
   fetchInitialFirestoreData,
   fetchUserFromFirestore,
-  fetchFreshestUserData
+  fetchFreshestUserData,
+  creditUserDepositInFirestore,
+  subscribeToUserRealtime
 } from '../lib/firestoreSync';
 import { playAdminNotificationSound, triggerPendingRequestAlert } from '../lib/adminRealtimeService';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
@@ -1429,6 +1431,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Real-time Firestore document subscription & wallet_updated listener for current logged-in user
+  useEffect(() => {
+    if (!user?.id || user.id === 'usr_default_01' || !isLoggedIn) return;
+
+    // Immediately fetch freshest user data & balance from Firestore
+    fetchFreshestUserData(user.id, user.phone).then(({ user: cloudUser, wallet: cloudWallet }) => {
+      if (cloudWallet && typeof cloudWallet.balance === 'number') {
+        setWallet(prev => {
+          if (cloudWallet.balance === 0 && Number(prev.balance) > 0) return prev;
+          return {
+            ...prev,
+            ...cloudWallet,
+            balance: cloudWallet.balance
+          };
+        });
+      }
+      if (cloudUser) {
+        setUser(prev => ({
+          ...prev,
+          ...cloudUser,
+          balance: cloudWallet?.balance ?? cloudUser.balance ?? prev.balance
+        }));
+      }
+    });
+
+    // Real-time snapshot subscription to Firestore users/{uid}
+    const unsubscribe = subscribeToUserRealtime(user.id, ({ user: cloudUser, wallet: cloudWallet }) => {
+      if (cloudWallet && typeof cloudWallet.balance === 'number') {
+        setWallet(prev => {
+          if (cloudWallet.balance === 0 && Number(prev.balance) > 0) return prev;
+          return {
+            ...prev,
+            ...cloudWallet,
+            balance: cloudWallet.balance
+          };
+        });
+      }
+      if (cloudUser) {
+        setUser(prev => ({
+          ...prev,
+          ...cloudUser,
+          balance: cloudWallet?.balance ?? cloudUser.balance ?? prev.balance
+        }));
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user?.id, isLoggedIn]);
+
+  // Window event listener for wallet updates (rewards, deposits, transactions)
+  useEffect(() => {
+    const handleWalletUpdated = (e: any) => {
+      if (e?.detail?.wallet && typeof e.detail.wallet.balance === 'number') {
+        const newBal = Number(e.detail.wallet.balance);
+        setWallet(prev => ({
+          ...prev,
+          ...e.detail.wallet,
+          balance: newBal
+        }));
+        setUser(prev => ({
+          ...prev,
+          balance: newBal
+        }));
+      }
+      if (e?.detail?.transaction) {
+        setTransactions(prev => [e.detail.transaction, ...prev.filter(t => t.id !== e.detail.transaction.id)]);
+      }
+    };
+
+    window.addEventListener('goodlife:wallet_updated', handleWalletUpdated);
+    return () => window.removeEventListener('goodlife:wallet_updated', handleWalletUpdated);
+  }, []);
+
   // Real-time Firestore subscription, Backend API sync & SSE real-time sync for deposit requests & wallet
   useEffect(() => {
     // 0. Initial & periodic API sync from backend database
@@ -1853,6 +1930,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   balance: typeof balance === 'number' ? balance : prev.balance,
                   totalEarned: typeof totalEarned === 'number' ? totalEarned : prev.totalEarned
                 }));
+              }
+            } else if (payload.type === 'reward_claimed' && payload.userId) {
+              const { userId, wallet: cloudWallet, transaction: cloudTx } = payload;
+              const cur = userRef.current;
+              if (cur && (cur.id === userId || cur.phone === userId)) {
+                if (cloudWallet && typeof cloudWallet.balance === 'number') {
+                  setWallet(prev => ({
+                    ...prev,
+                    ...cloudWallet,
+                    balance: cloudWallet.balance
+                  }));
+                  setUser(prev => ({ ...prev, balance: cloudWallet.balance }));
+                }
+                if (cloudTx) {
+                  setTransactions(prev => [cloudTx, ...prev.filter(t => t.id !== cloudTx.id)]);
+                }
               }
             } else if (payload.type === 'shop_created' && payload.shop) {
               setShops(prev => {
@@ -4966,6 +5059,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return u;
     }));
+
+    // 4. Authoritative Firestore transaction credit (strictly isolated to User UID, duplicate-proof)
+    creditUserDepositInFirestore(updatedReq).then(res => {
+      if (res.success && typeof res.newBalance === 'number') {
+        if (isCurrentUser) {
+          setWallet(prev => ({
+            ...prev,
+            balance: res.newBalance,
+            updatedAt: new Date().toISOString()
+          }));
+          setUser(prev => ({ ...prev, balance: res.newBalance }));
+        }
+      }
+    });
 
     if (matchedRegUser) {
       syncUserWithFirestore(matchedRegUser, (matchedRegUser as any).wallet);

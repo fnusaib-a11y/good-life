@@ -17,7 +17,12 @@ import {
   ToggleLeft,
   ToggleRight,
   DollarSign,
-  Sparkles
+  Sparkles,
+  Link,
+  Share2,
+  Send,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { 
@@ -110,9 +115,13 @@ export const AdminRewardCenterTab: React.FC = () => {
   const [temuEndDate, setTemuEndDate] = useState('');
   const [temuStatus, setTemuStatus] = useState<'active' | 'inactive'>('active');
 
-  // Invite bonus state
+  // Invite bonus & link state
   const [inviteBonus, setInviteBonus] = useState(10);
   const [inviteTerms, setInviteTerms] = useState('');
+  const [inviteLinkEnabled, setInviteLinkEnabled] = useState(true);
+  const [inviteLinkTemplate, setInviteLinkTemplate] = useState('https://goodlife.app/?ref={code}');
+  const [inviteShareMessage, setInviteShareMessage] = useState('Good Life প্ল্যাটফর্মে যোগ দিন এবং সাথে সাথে সাইন-আপ ও রিওয়ার্ড বোনাস গ্রহণ করুন!');
+  const [telegramChannelUrl, setTelegramChannelUrl] = useState('https://t.me/goodlife_official');
 
   const loadSettings = async () => {
     setLoading(true);
@@ -127,6 +136,14 @@ export const AdminRewardCenterTab: React.FC = () => {
       }
       if (data.inviteTerms !== undefined) {
         setInviteTerms(data.inviteTerms);
+      }
+      if (data.inviteLinkConfig) {
+        setInviteLinkEnabled(data.inviteLinkConfig.enabled !== false);
+        setInviteLinkTemplate(data.inviteLinkConfig.linkTemplate || 'https://goodlife.app/?ref={code}');
+        setInviteShareMessage(data.inviteLinkConfig.shareMessage || '');
+      }
+      if (data.telegramChannelUrl) {
+        setTelegramChannelUrl(data.telegramChannelUrl);
       }
     } catch (e) {
       console.error(e);
@@ -333,6 +350,24 @@ export const AdminRewardCenterTab: React.FC = () => {
     await loadSettings();
   };
 
+  const handleCopyTelegramPost = (p: PromoCodeItem) => {
+    const postText = `🎁 Good Life স্পেশাল প্রচার কোড (Promo Code)!
+
+🔑 কোড: ${p.code}
+💰 রিওয়ার্ড বোনাস: ৳${Number(p.rewardAmount).toFixed(2)}
+📌 বিবরণ: ${p.title || p.description || 'সকলের জন্য অফিশিয়াল গিফট'}
+⏰ মেয়াদ: ${p.expiryDate ? p.expiryDate + ' পর্যন্ত' : 'সীমিত সময়ের জন্য'}
+👥 লিমিট: ${p.totalUsageLimit ? `প্রথম ${p.totalUsageLimit} জন ইউজার` : 'নির্ধারিত লিমিট পর্যন্ত'}
+
+📱 কিভাবে পাবেন:
+Good Life অ্যাপে লগইন করে 'পুরস্কার সেন্টার' > 'প্রচার কোড'-এ গিয়ে কোডটি বসিয়ে 'খালাস' বাটনে চাপলেই টাকা সরাসরি মূল ব্যালেন্সে যুক্ত হবে! 🚀
+
+⚠️ শর্ত: ১টি কোড ১ জন ইউজার একবারই ব্যবহার করতে পারবেন।`;
+
+    navigator.clipboard?.writeText(postText);
+    showToast(`📢 প্রচার কোড ${p.code}-এর টেলিগ্রাম পোস্ট কপি হয়েছে! টেলিগ্রাম চ্যানেলে পেস্ট করুন।`);
+  };
+
   /* ------------------- TEMU TICKET ACTIONS ------------------- */
   const handleSaveTemu = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -387,16 +422,23 @@ export const AdminRewardCenterTab: React.FC = () => {
     await loadSettings();
   };
 
-  /* ------------------- INVITE BONUS SETTINGS ------------------- */
+  /* ------------------- INVITE BONUS & LINK SETTINGS ------------------- */
   const handleSaveInvite = async () => {
     if (!settings) return;
-    const updated = {
+    const updated: RewardCenterSystemSettings = {
       ...settings,
       inviteBonusAmount: Number(inviteBonus) || 10,
-      inviteTerms: inviteTerms.trim()
+      inviteTerms: inviteTerms.trim(),
+      telegramChannelUrl: telegramChannelUrl.trim(),
+      inviteLinkConfig: {
+        enabled: inviteLinkEnabled,
+        linkTemplate: inviteLinkTemplate.trim() || 'https://goodlife.app/?ref={code}',
+        shareMessage: inviteShareMessage.trim(),
+        updatedAt: new Date().toISOString()
+      }
     };
     await saveRewardCenterSettings(updated);
-    showToast('আমন্ত্রণ রিওয়ার্ড সেটিংস সেভ হয়েছে!');
+    showToast('আমন্ত্রণ লিঙ্ক ও রিওয়ার্ড সেটিংস সফলভাবে সেভ হয়েছে!');
     await loadSettings();
   };
 
@@ -884,22 +926,112 @@ export const AdminRewardCenterTab: React.FC = () => {
         </div>
       )}
 
-      {/* ---------------- 4. বন্ধুদের আমন্ত্রণ (INVITE SETTINGS) ---------------- */}
+      {/* ---------------- 4. বন্ধুদের আমন্ত্রণ (INVITE LINK & BONUS SETTINGS) ---------------- */}
       {activeTab === 'invite' && (
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-base font-extrabold text-slate-900">
-              বন্ধুদের আমন্ত্রণ বোনাস ও টার্মস সেটিংস
-            </h3>
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <Link className="w-5 h-5 text-amber-500" />
+                <span>বন্ধুদের আমন্ত্রণ লিংক ও বোনাস সেটিংস</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                অ্যাডমিন কর্তৃক নির্ধারিত রিয়েল ইনভাইট লিংকই শুধু ইউজার সাইডে প্রদর্শিত হবে। কোনো ডেমো বা হার্ডকোডেড লিংক দেখানো হবে না।
+              </p>
+            </div>
             <button
               onClick={handleSaveInvite}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow flex items-center gap-1 cursor-pointer"
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
             >
               <Save className="w-4 h-4" /> সংরক্ষণ করুন
             </button>
           </div>
 
+          {/* Master Enable/Disable Switch for Invite Link */}
+          <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold text-amber-950 block">
+                আমন্ত্রণ লিংক স্ট্যাটাস (Enable/Disable Invite Link)
+              </span>
+              <span className="text-[11px] text-amber-800/80 block mt-0.5">
+                নিষ্ক্রিয় রাখলে ইউজাররা কোনো আমন্ত্রণ লিংক কপি বা শেয়ার করতে পারবেন না (নোটিশ দেখতে পাবেন)।
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInviteLinkEnabled(!inviteLinkEnabled)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                inviteLinkEnabled 
+                  ? 'bg-emerald-600 text-white shadow-xs' 
+                  : 'bg-rose-500 text-white shadow-xs'
+              }`}
+            >
+              {inviteLinkEnabled ? (
+                <>
+                  <Check className="w-4 h-4" /> সক্রিয় (Active)
+                </>
+              ) : (
+                <>
+                  <X className="w-4 h-4" /> নিষ্ক্রিয় (Disabled)
+                </>
+              )}
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {/* Invite Link Template */}
+            <div className="md:col-span-2">
+              <label className="font-bold text-slate-800 block mb-1">
+                আমন্ত্রণ লিংক টেমপ্লেট (Invite Link Template) *
+              </label>
+              <input
+                type="text"
+                required
+                value={inviteLinkTemplate}
+                onChange={e => setInviteLinkTemplate(e.target.value)}
+                placeholder="যেমন: https://goodlife.app/?ref={code}"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono font-semibold focus:border-amber-500 outline-none"
+              />
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-semibold">
+                  &#123;code&#125;
+                </span>
+                <span className="text-slate-500">
+                  লিখলে তা স্বয়ংক্রিয়ভাবে ইউজারের নিজস্ব ইউনিক রেফারেল কোড দ্বারা রিপ্লেস হবে।
+                </span>
+              </div>
+
+              {/* Dynamic Live Preview Box */}
+              <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  ইউজার সাইডে লাইভ লিংক প্রিভিউ (Live Preview):
+                </span>
+                <code className="text-xs font-mono font-bold text-amber-700 break-all">
+                  {inviteLinkTemplate.includes('{code}') 
+                    ? inviteLinkTemplate.replace(/\{code\}/g, 'GL8842')
+                    : (inviteLinkTemplate.includes('?') ? `${inviteLinkTemplate}&ref=GL8842` : `${inviteLinkTemplate}?ref=GL8842`)}
+                </code>
+              </div>
+            </div>
+
+            {/* Share Message */}
+            <div className="md:col-span-2">
+              <label className="font-bold text-slate-800 block mb-1">
+                শেয়ার মেসেজ টেক্সট (Share Message)
+              </label>
+              <input
+                type="text"
+                value={inviteShareMessage}
+                onChange={e => setInviteShareMessage(e.target.value)}
+                placeholder="Good Life প্ল্যাটফর্মে যোগ দিন এবং সাথে সাথে সাইন-আপ ও রিওয়ার্ড বোনাস গ্রহণ করুন!"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:border-amber-500 outline-none font-medium"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                ইউজার যখন হোয়াটসঅ্যাপ বা সোশ্যাল মিডিয়ায় শেয়ার বাটনে চাপবেন, তখন এই মেসেজটি যাবে।
+              </span>
+            </div>
+
+            {/* Referral Bonus */}
             <div>
               <label className="font-bold text-slate-800 block mb-1">রেফারেল বোনাস টাকা (৳)</label>
               <input
@@ -909,9 +1041,28 @@ export const AdminRewardCenterTab: React.FC = () => {
                 className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold focus:border-amber-500 outline-none"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                আমন্ত্রিত বন্ধু ভেরিফিকেশন সম্পন্ন করলে স্বয়ংক্রিয়ভাবে রেফারার এই বোনাস পাবেন।
+                আমন্ত্রিত বন্ধু একাউন্ট খুলে ভেরিফিকেশন সম্পন্ন করলে রেফারার এই বোনাস পাবেন।
               </span>
             </div>
+
+            {/* Telegram Channel URL for community */}
+            <div>
+              <label className="font-bold text-slate-800 block mb-1">
+                অফিশিয়াল টেলিগ্রাম চ্যানেল লিংক (Telegram Channel URL)
+              </label>
+              <input
+                type="text"
+                value={telegramChannelUrl}
+                onChange={e => setTelegramChannelUrl(e.target.value)}
+                placeholder="https://t.me/goodlife_official"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono focus:border-amber-500 outline-none"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                প্রচার কোড ও অফিশিয়াল আপডেটের জন্য ইউজারদের এই টেলিগ্রাম চ্যানেলে পাঠানো হবে।
+              </span>
+            </div>
+
+            {/* Terms */}
             <div className="md:col-span-2">
               <label className="font-bold text-slate-800 block mb-1">আমন্ত্রণ নিয়ম ও শর্তাবলী (Terms)</label>
               <textarea
@@ -926,13 +1077,19 @@ export const AdminRewardCenterTab: React.FC = () => {
         </div>
       )}
 
-      {/* ---------------- 5. প্রচার কোড (PROMO CODE) - FIX VISIBILITY ---------------- */}
+      {/* ---------------- 5. প্রচার কোড (PROMO CODE) - ADMIN ONLY & TELEGRAM ---------------- */}
       {activeTab === 'promo' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-base font-extrabold text-slate-900">
-              প্রচার কোড (প্রোমো কোড) তালিকা ({(settings?.promoCodes || []).length})
-            </h3>
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <QrCode className="w-5 h-5 text-amber-500" />
+                <span>প্রচার কোড (প্রোমো কোড) অ্যাডমিন প্যানেল</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                প্রচার কোড সাধারণ ইউজারদের কাছে উন্মুক্ত নয়। শুধুমাত্র অ্যাডমিন এখান থেকে কোড তৈরি করে টেলিগ্রাম চ্যানেলে প্রকাশ করবেন।
+              </p>
+            </div>
             <button
               onClick={() => {
                 setEditingPromoId(null);
@@ -944,10 +1101,37 @@ export const AdminRewardCenterTab: React.FC = () => {
                 setPromoPerUserLimit(1);
                 setPromoFormOpen(true);
               }}
-              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow flex items-center gap-1.5 cursor-pointer shrink-0"
             >
               <Plus className="w-4 h-4" /> নতুন প্রচার কোড
             </button>
+          </div>
+
+          {/* Telegram Channel Announcement Info Banner */}
+          <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-sky-500 text-white flex items-center justify-center shrink-0 mt-0.5">
+                <Send className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-sky-950">
+                  টেলিগ্রাম চ্যানেলে প্রচার কোড প্রকাশের নিয়ম
+                </h4>
+                <p className="text-[11px] text-sky-800/90 mt-0.5 leading-relaxed">
+                  ইউজাররা টেলিগ্রাম চ্যানেল থেকে কোড সংগ্রহ করে অ্যাপে রিডিম করবে। যেকোনো প্রচার কোডের পাশের <span className="font-bold text-sky-950">&ldquo;টেলিগ্রাম পোস্ট&rdquo;</span> বাটনে ক্লিক করলে স্বয়ংক্রিয়ভাবে একটি রেডিমেড অ্যানাউন্সমেন্ট পোস্ট ক্লিপবোর্ডে কপি হয়ে যাবে, যা আপনি সরাসরি টেলিগ্রাম চ্যানেলে পোস্ট করতে পারবেন।
+                </p>
+              </div>
+            </div>
+            {telegramChannelUrl && (
+              <a
+                href={telegramChannelUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer shadow-xs"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> চ্যানেল ওপেন
+              </a>
+            )}
           </div>
 
           {promoFormOpen && (
@@ -1079,7 +1263,16 @@ export const AdminRewardCenterTab: React.FC = () => {
                       ব্যবহার: {p.usedCount || 0}/{p.totalUsageLimit || 'আনলিমিটেড'} | মেয়াদ: {p.expiryDate || 'অনির্দিষ্ট'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button 
+                      type="button"
+                      onClick={() => handleCopyTelegramPost(p)} 
+                      className="px-2.5 py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs flex items-center gap-1 cursor-pointer transition-all border border-sky-200"
+                      title="টেলিগ্রাম চ্যানেলে প্রকাশের জন্য পোস্ট কপি করুন"
+                    >
+                      <Send className="w-3.5 h-3.5 text-sky-600" />
+                      <span className="hidden sm:inline">টেলিগ্রাম পোস্ট</span>
+                    </button>
                     <button onClick={() => handleEditPromo(p)} className="p-1.5 text-slate-500 hover:text-amber-600 cursor-pointer">
                       <Edit3 className="w-4 h-4" />
                     </button>
