@@ -117,6 +117,7 @@ export async function creditUserDepositInFirestore(deposit: DepositRequest): Pro
     const processedRef = doc(db, 'users', cleanUid, 'processed_deposits', cleanDepId);
     const userDocRef = doc(db, 'users', cleanUid);
     const depDocRef = doc(db, 'deposits', cleanDepId);
+    const depReqDocRef = doc(db, 'deposit_requests', cleanDepId);
 
     const createdTxId = `tx_dep_${cleanDepId}`;
 
@@ -193,6 +194,12 @@ export async function creditUserDepositInFirestore(deposit: DepositRequest): Pro
 
       // 6. Update deposit request status in Firestore
       transaction.set(depDocRef, {
+        ...deposit,
+        status: 'approved',
+        updatedAt: nowIso,
+        approvedAt: nowIso
+      }, { merge: true });
+      transaction.set(depReqDocRef, {
         ...deposit,
         status: 'approved',
         updatedAt: nowIso,
@@ -966,6 +973,384 @@ export function subscribeToUserRealtime(
     });
   } catch {
     return () => {};
+  }
+}
+
+/**
+ * Real-time listener for ALL users in Firestore (for admin views & member counts across devices)
+ */
+export function subscribeToAllUsersRealtime(
+  callback: (users: UserProfile[]) => void
+): () => void {
+  try {
+    const colRef = collection(db, 'users');
+    return onSnapshot(colRef, (snapshot) => {
+      const users: UserProfile[] = snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          wallet: data.wallet,
+          balance: typeof data.wallet?.balance === 'number' ? data.wallet.balance : data.balance
+        } as UserProfile;
+      });
+      callback(users);
+    }, (err) => {
+      console.warn('subscribeToAllUsersRealtime error:', err);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Real-time listener for withdrawals collection
+ */
+export function subscribeToWithdrawalsRealtime(
+  callback: (withdrawals: WithdrawalRequest[]) => void
+): () => void {
+  try {
+    const colRef = collection(db, 'withdrawals');
+    return onSnapshot(colRef, (snapshot) => {
+      const wds: WithdrawalRequest[] = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      } as WithdrawalRequest));
+      callback(wds);
+    }, (err) => {
+      console.warn('subscribeToWithdrawalsRealtime error:', err);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Real-time listener for User transactions in Firestore
+ */
+export function subscribeToUserTransactionsRealtime(
+  userId: string,
+  callback: (txs: Transaction[]) => void
+): () => void {
+  if (!userId) return () => {};
+  try {
+    const colRef = collection(db, 'users', userId, 'transactions');
+    return onSnapshot(colRef, (snapshot) => {
+      const txs: Transaction[] = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      } as Transaction));
+      txs.sort((a, b) => {
+        const tA = a.createdAt ? Date.parse(a.createdAt) : (a.date ? Date.parse(a.date) : 0);
+        const tB = b.createdAt ? Date.parse(b.createdAt) : (b.date ? Date.parse(b.date) : 0);
+        return tB - tA;
+      });
+      callback(txs);
+    }, (err) => {
+      console.warn('subscribeToUserTransactionsRealtime error:', err);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Real-time listener for System Settings in Firestore
+ */
+export function subscribeToSystemSettingsRealtime(
+  callback: (settings: any) => void
+): () => void {
+  try {
+    const setRef = doc(db, 'system_settings', 'app_config');
+    return onSnapshot(setRef, (snap) => {
+      if (snap.exists()) {
+        callback(snap.data());
+      }
+    }, (err) => {
+      console.warn('subscribeToSystemSettingsRealtime error:', err);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Sync System Settings to Firestore
+ */
+export async function syncSystemSettingsWithFirestore(settings: any) {
+  try {
+    const setRef = doc(db, 'system_settings', 'app_config');
+    await setDoc(setRef, {
+      ...settings,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (err) {
+    console.warn('syncSystemSettingsWithFirestore error:', err);
+  }
+}
+
+/**
+ * Reject Deposit Request in Firestore
+ */
+export async function rejectDepositInFirestore(depositId: string, reason?: string) {
+  if (!depositId) return;
+  try {
+    const nowIso = new Date().toISOString();
+    const payload = {
+      status: 'rejected',
+      rejectionReason: reason || 'বাতিল করা হয়েছে',
+      rejectedAt: nowIso,
+      updatedAt: nowIso
+    };
+    await setDoc(doc(db, 'deposit_requests', depositId), payload, { merge: true });
+    await setDoc(doc(db, 'deposits', depositId), payload, { merge: true });
+  } catch (err) {
+    console.warn('rejectDepositInFirestore error:', err);
+  }
+}
+
+/**
+ * Approve Withdrawal in Firestore
+ */
+export async function approveWithdrawalInFirestore(withdrawalId: string) {
+  if (!withdrawalId) return;
+  try {
+    const nowIso = new Date().toISOString();
+    const payload = {
+      status: 'approved',
+      approvedAt: nowIso,
+      updatedAt: nowIso
+    };
+    await setDoc(doc(db, 'withdrawals', withdrawalId), payload, { merge: true });
+  } catch (err) {
+    console.warn('approveWithdrawalInFirestore error:', err);
+  }
+}
+
+/**
+ * Atomically deduct user balance and save withdrawal request in Firestore
+ */
+export async function deductBalanceForWithdrawalInFirestore(
+  userId: string,
+  withdrawal: WithdrawalRequest
+): Promise<{ success: boolean; newBalance?: number }> {
+  if (!userId || !withdrawal || !withdrawal.id) return { success: false };
+  const cleanUid = String(userId).trim();
+  const amount = Number(withdrawal.amount) || 0;
+  const nowIso = new Date().toISOString();
+
+  try {
+    await ensureFirebaseAuth();
+    const userDocRef = doc(db, 'users', cleanUid);
+    const wdDocRef = doc(db, 'withdrawals', withdrawal.id);
+    const txId = `tx_wth_${withdrawal.id}`;
+
+    let newBalance = 0;
+    await runTransaction(db, async (t) => {
+      const uSnap = await t.get(userDocRef);
+      let currentBal = 0;
+      let existingData: any = {};
+      if (uSnap.exists()) {
+        existingData = uSnap.data() || {};
+        currentBal = typeof existingData.wallet?.balance === 'number'
+          ? existingData.wallet.balance
+          : (typeof existingData.balance === 'number' ? existingData.balance : 0);
+      }
+      newBalance = Math.round(Math.max(0, currentBal - amount) * 100) / 100;
+      const updatedWallet = {
+        ...(existingData.wallet || {}),
+        balance: newBalance,
+        totalWithdrawn: Math.round(((Number(existingData.wallet?.totalWithdrawn) || 0) + amount) * 100) / 100
+      };
+
+      t.set(userDocRef, {
+        ...existingData,
+        balance: newBalance,
+        wallet: updatedWallet,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      t.set(wdDocRef, {
+        ...withdrawal,
+        status: 'pending',
+        createdAt: nowIso,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      const wdTx: Transaction = {
+        id: txId,
+        userId: cleanUid,
+        type: 'withdrawal',
+        amount: amount,
+        date: nowIso.split('T')[0],
+        createdAt: nowIso,
+        status: 'pending',
+        referenceId: withdrawal.id,
+        description: `${withdrawal.paymentMethod || 'ওয়ালেট'} উইথড্রাল আবেদন (${withdrawal.accountNumber || (withdrawal as any).account || ''})`,
+        paymentMethod: withdrawal.paymentMethod || 'Bkash'
+      };
+      t.set(doc(db, 'users', cleanUid, 'transactions', txId), wdTx);
+      t.set(doc(db, 'transactions', txId), wdTx);
+    });
+
+    return { success: true, newBalance };
+  } catch (err) {
+    console.warn('deductBalanceForWithdrawalInFirestore error:', err);
+    return { success: false };
+  }
+}
+
+/**
+ * Atomically reject withdrawal and refund balance in Firestore
+ */
+export async function rejectAndRefundWithdrawalInFirestore(
+  withdrawal: WithdrawalRequest,
+  reason: string
+): Promise<{ success: boolean; newBalance?: number }> {
+  if (!withdrawal || !withdrawal.id || !withdrawal.userId) return { success: false };
+  const cleanUid = String(withdrawal.userId).trim();
+  const cleanWdId = String(withdrawal.id).trim();
+  const amount = Number(withdrawal.amount) || 0;
+  const nowIso = new Date().toISOString();
+
+  try {
+    await ensureFirebaseAuth();
+    const userDocRef = doc(db, 'users', cleanUid);
+    const wdDocRef = doc(db, 'withdrawals', cleanWdId);
+    const txId = `tx_ref_${cleanWdId}`;
+
+    let newBalance = 0;
+    await runTransaction(db, async (t) => {
+      const uSnap = await t.get(userDocRef);
+      let currentBal = 0;
+      let existingData: any = {};
+      if (uSnap.exists()) {
+        existingData = uSnap.data() || {};
+        currentBal = typeof existingData.wallet?.balance === 'number'
+          ? existingData.wallet.balance
+          : (typeof existingData.balance === 'number' ? existingData.balance : 0);
+      }
+      newBalance = Math.round((currentBal + amount) * 100) / 100;
+      const updatedWallet = {
+        ...(existingData.wallet || {}),
+        balance: newBalance
+      };
+
+      t.set(userDocRef, {
+        ...existingData,
+        balance: newBalance,
+        wallet: updatedWallet,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      t.set(wdDocRef, {
+        ...withdrawal,
+        status: 'rejected',
+        rejectionReason: reason,
+        rejectedAt: nowIso,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      const refundTx: Transaction = {
+        id: txId,
+        userId: cleanUid,
+        type: 'refund',
+        amount: amount,
+        date: nowIso.split('T')[0],
+        createdAt: nowIso,
+        status: 'completed',
+        description: `উইথড্র বাতিলজনিত রিফান্ড (${reason})`
+      };
+      t.set(doc(db, 'users', cleanUid, 'transactions', txId), refundTx);
+      t.set(doc(db, 'transactions', txId), refundTx);
+    });
+
+    return { success: true, newBalance };
+  } catch (err) {
+    console.warn('rejectAndRefundWithdrawalInFirestore error:', err);
+    return { success: false };
+  }
+}
+
+/**
+ * Atomically credit referral reward to referrer in Firestore
+ */
+export async function creditReferralBonusInFirestore(
+  referrerPhoneOrCode: string,
+  bonusAmount: number,
+  referredUserName: string
+): Promise<boolean> {
+  if (!referrerPhoneOrCode || bonusAmount <= 0) return false;
+  try {
+    await ensureFirebaseAuth();
+    const cleanCode = referrerPhoneOrCode.trim();
+    const cleanPhone = normalizePhoneNumber(referrerPhoneOrCode);
+
+    let refUserId: string = '';
+
+    const qCode = query(collection(db, 'users'), where('referralCode', '==', cleanCode), limit(1));
+    const snapCode = await getDocs(qCode);
+    if (!snapCode.empty) {
+      refUserId = snapCode.docs[0].id;
+    } else if (cleanPhone) {
+      const qPhone = query(collection(db, 'users'), where('phone', '==', cleanPhone), limit(1));
+      const snapPhone = await getDocs(qPhone);
+      if (!snapPhone.empty) {
+        refUserId = snapPhone.docs[0].id;
+      }
+    }
+
+    if (!refUserId) return false;
+
+    const userDocRef = doc(db, 'users', refUserId);
+    const nowIso = new Date().toISOString();
+    const txId = `tx_ref_bonus_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    await runTransaction(db, async (t) => {
+      const uSnap = await t.get(userDocRef);
+      if (!uSnap.exists()) return;
+      const data = uSnap.data();
+      const currentBal = typeof data.wallet?.balance === 'number' ? data.wallet.balance : (typeof data.balance === 'number' ? data.balance : 0);
+      const newBal = Math.round((currentBal + bonusAmount) * 100) / 100;
+      const currentEarned = Number(data.wallet?.totalEarned || data.totalEarned) || 0;
+      const newEarned = Math.round((currentEarned + bonusAmount) * 100) / 100;
+      const refIncome = Number(data.wallet?.incomeBreakdown?.referralIncome) || 0;
+
+      const updatedWallet = {
+        ...(data.wallet || {}),
+        balance: newBal,
+        totalEarned: newEarned,
+        incomeBreakdown: {
+          ...(data.wallet?.incomeBreakdown || {}),
+          referralIncome: Math.round((refIncome + bonusAmount) * 100) / 100
+        }
+      };
+
+      t.set(userDocRef, {
+        ...data,
+        balance: newBal,
+        wallet: updatedWallet,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      const tx: Transaction = {
+        id: txId,
+        userId: refUserId,
+        type: 'referral_bonus',
+        amount: bonusAmount,
+        date: nowIso.split('T')[0],
+        createdAt: nowIso,
+        status: 'completed',
+        description: `রেফারেল বোনাস (${referredUserName})`
+      };
+      t.set(doc(db, 'users', refUserId, 'transactions', txId), tx);
+      t.set(doc(db, 'transactions', txId), tx);
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('creditReferralBonusInFirestore error:', err);
+    return false;
   }
 }
 

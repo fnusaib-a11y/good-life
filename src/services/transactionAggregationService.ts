@@ -1,4 +1,6 @@
 import { Transaction, UserProfile, WalletState } from '../types';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 export interface AggregatedUserTransactionReport {
   userId: string;
@@ -447,22 +449,53 @@ export async function fetchUserTransactions(userId: string, userPhone?: string):
 
   let fetchedList: Transaction[] = [];
 
-  // Try server API first
+  // 1. Primary Source: Query Firestore cloud database directly (authoritative for APK and Web)
   try {
-    const res = await fetch(`/api/transactions?userId=${encodeURIComponent(cleanUid)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.transactions)) {
-        fetchedList = data.transactions;
-      } else if (Array.isArray(data)) {
-        fetchedList = data;
-      }
+    const userTxCol = collection(db, 'users', cleanUid, 'transactions');
+    const snap = await getDocs(userTxCol);
+    if (!snap.empty) {
+      snap.forEach(d => {
+        fetchedList.push({ id: d.id, ...d.data() } as Transaction);
+      });
     }
   } catch (err) {
-    console.warn('[TransactionService] Failed fetching from API, falling back to local storage', err);
+    console.warn('[TransactionService] Firestore user transactions query note:', err);
   }
 
-  // If API returned nothing or failed, load from user-isolated local storage
+  // Also query root transactions collection if user subcollection was empty
+  if (fetchedList.length === 0) {
+    try {
+      const rootTxCol = collection(db, 'transactions');
+      const q = query(rootTxCol, where('userId', '==', cleanUid));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        snap.forEach(d => {
+          fetchedList.push({ id: d.id, ...d.data() } as Transaction);
+        });
+      }
+    } catch (err) {
+      console.warn('[TransactionService] Firestore root transactions query note:', err);
+    }
+  }
+
+  // 2. Secondary fallback: Server API (if online in web environment)
+  if (fetchedList.length === 0) {
+    try {
+      const res = await fetch(`/api/transactions?userId=${encodeURIComponent(cleanUid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.transactions)) {
+          fetchedList = data.transactions;
+        } else if (Array.isArray(data)) {
+          fetchedList = data;
+        }
+      }
+    } catch (err) {
+      // Offline or APK
+    }
+  }
+
+  // 3. Last fallback: Offline cached local storage
   if (fetchedList.length === 0 && typeof window !== 'undefined') {
     try {
       const userKey = `lg_transactions_${cleanUid}`;
@@ -470,7 +503,6 @@ export async function fetchUserTransactions(userId: string, userPhone?: string):
       if (savedUserStr) {
         fetchedList = JSON.parse(savedUserStr);
       } else {
-        // Fallback to global lg_transactions filtered strictly by user
         const globalStr = localStorage.getItem('lg_transactions');
         if (globalStr) {
           const allTxs: Transaction[] = JSON.parse(globalStr);

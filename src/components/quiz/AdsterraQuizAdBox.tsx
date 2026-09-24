@@ -58,8 +58,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
   const [adState, setAdState] = useState<'initializing' | 'loading' | 'active' | 'completed' | 'error'>('initializing');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number>(durationSeconds);
-  const [containerWidth, setContainerWidth] = useState<number>(500);
-  const [scale, setScale] = useState<number>(1);
+  const [containerWidth, setContainerWidth] = useState<number>(360);
   const [retryNonce, setRetryNonce] = useState<number>(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,31 +66,29 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
   const timerRef = useRef<any>(null);
   const hasCompletedRef = useRef<boolean>(isCompleted);
 
-  // Dimensions based on banner format (728x90 scaled responsively or 300x250)
-  const baseWidth = 728;
-  const baseHeight = 90;
+  // Responsive dimensions: On mobile (320px-480px) use full-width 300x250 responsive format
+  const isMobile = containerWidth < 600;
+  const adWidth = isMobile ? (containerWidth < 340 ? 300 : 320) : (containerWidth < 768 ? 468 : 728);
+  const adHeight = isMobile ? 250 : 90;
 
-  // Responsive scale calculation
+  // Responsive container width tracking
   useEffect(() => {
-    const updateScale = () => {
+    const updateWidth = () => {
       if (!containerRef.current) return;
       const clientW = containerRef.current.clientWidth;
       if (clientW > 0) {
         setContainerWidth(clientW);
-        const targetW = Math.min(clientW - 16, baseWidth);
-        const computedScale = targetW / baseWidth;
-        setScale(Math.max(0.4, Math.min(1, computedScale)));
       }
     };
 
-    updateScale();
-    const observer = new ResizeObserver(updateScale);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
     if (containerRef.current) observer.observe(containerRef.current);
-    window.addEventListener('resize', updateScale);
+    window.addEventListener('resize', updateWidth);
 
     return () => {
       observer.disconnect();
-      window.removeEventListener('resize', updateScale);
+      window.removeEventListener('resize', updateWidth);
     };
   }, []);
 
@@ -142,21 +139,25 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 100%;
-      height: 100%;
+      min-height: 100%;
       background: transparent;
-      overflow: hidden;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
+      overflow: visible;
     }
     #ad-wrapper {
-      width: ${baseWidth}px;
-      height: ${baseHeight}px;
-      overflow: hidden;
+      width: 100%;
+      max-width: 100%;
+      min-height: ${adHeight}px;
       display: flex;
       justify-content: center;
       align-items: center;
+    }
+    #ad-wrapper iframe, #ad-wrapper img {
+      max-width: 100% !important;
+      height: auto !important;
     }
   </style>
 </head>
@@ -167,8 +168,8 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
       atOptions = {
         'key' : '${activeKey}',
         'format' : 'iframe',
-        'height' : ${baseHeight},
-        'width' : ${baseWidth},
+        'height' : ${adHeight},
+        'width' : ${adWidth},
         'params' : {}
       };
     </script>
@@ -221,7 +222,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
       clearTimeout(fallbackTimer);
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [activeKey, scriptUrl, baseWidth, baseHeight, durationSeconds, retryNonce, uniqueInstanceId, isCompleted, isBn]);
+  }, [activeKey, scriptUrl, adWidth, adHeight, durationSeconds, retryNonce, uniqueInstanceId, isCompleted, isBn]);
 
   // Verified Countdown Timer (Active while Ad is showing)
   useEffect(() => {
@@ -359,11 +360,11 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
         {/* Dedicated Reserved Adsterra Ad Container */}
         <div 
           ref={containerRef}
-          className="w-full bg-slate-950/70 rounded-xl border border-slate-800 p-2 sm:p-3 relative overflow-hidden flex flex-col items-center justify-center min-h-[140px] sm:min-h-[160px]"
+          className="w-full max-w-full bg-slate-950/70 rounded-xl border border-slate-800 p-2 sm:p-3 relative flex flex-col items-center justify-center min-h-[250px] sm:min-h-[260px] h-auto"
         >
           {/* Loading Skeleton */}
           {adState === 'loading' && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/90 text-center p-4 space-y-2.5">
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/90 text-center p-4 space-y-2.5 rounded-xl">
               <RefreshCw className="w-6 h-6 text-purple-400 animate-spin" />
               <div className="space-y-1">
                 <p className="text-xs font-bold text-slate-200">
@@ -378,7 +379,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
 
           {/* Error State */}
           {adState === 'error' && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/95 p-4 text-center space-y-3">
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/95 p-4 text-center space-y-3 rounded-xl">
               <AlertCircle className="w-7 h-7 text-rose-400" />
               <div className="space-y-1 max-w-xs">
                 <p className="text-xs font-bold text-rose-200">
@@ -401,20 +402,20 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
 
           {/* Sandboxed Adsterra iframe container */}
           <div 
-            style={{
-              width: `${baseWidth}px`,
-              height: `${baseHeight}px`,
-              transform: `scale(${scale})`,
-              transformOrigin: 'center center',
-              maxWidth: 'none'
-            }}
-            className="flex items-center justify-center shrink-0"
+            className="w-full max-w-full flex items-center justify-center relative my-auto"
+            style={{ minHeight: `${adHeight}px` }}
           >
             <iframe
               ref={iframeRef}
               id={`adsterra-frame-${uniqueInstanceId}`}
               title="Adsterra Ad Frame"
-              className="w-full h-full border-0 bg-transparent overflow-hidden"
+              className="w-full max-w-full border-0 bg-transparent block"
+              style={{
+                width: '100%',
+                maxWidth: '100%',
+                minHeight: `${adHeight}px`,
+                height: `${adHeight}px`
+              }}
               scrolling="no"
             />
           </div>
