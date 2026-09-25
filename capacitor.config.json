@@ -2,5 +2,12 @@
   "appId": "com.goodlife.app",
   "appName": "Good Life",
   "webDir": "dist",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://ais-pre-robxl2sbg7riqqssv7s2mt-403027633480.asia-southeast1.run.app",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
 }

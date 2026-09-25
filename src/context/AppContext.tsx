@@ -75,8 +75,17 @@ import {
   fetchUserFromFirestore,
   fetchFreshestUserData,
   creditUserDepositInFirestore,
-  subscribeToUserRealtime
+  subscribeToUserRealtime,
+  subscribeToAllUsersRealtime,
+  subscribeToWithdrawalsRealtime,
+  subscribeToUserTransactionsRealtime,
+  subscribeToSystemSettingsRealtime,
+  approveWithdrawalInFirestore,
+  rejectAndRefundWithdrawalInFirestore,
+  deductBalanceForWithdrawalInFirestore,
+  creditReferralBonusInFirestore
 } from '../lib/firestoreSync';
+import { createSafeEventSource } from '../lib/apiConfig';
 import { playAdminNotificationSound, triggerPendingRequestAlert } from '../lib/adminRealtimeService';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -1456,8 +1465,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // Real-time snapshot subscription to Firestore users/{uid}
-    const unsubscribe = subscribeToUserRealtime(user.id, ({ user: cloudUser, wallet: cloudWallet }) => {
+    // 1. Real-time snapshot subscription to Firestore users/{uid}
+    const unsubscribeUser = subscribeToUserRealtime(user.id, ({ user: cloudUser, wallet: cloudWallet }) => {
       if (cloudWallet && typeof cloudWallet.balance === 'number') {
         setWallet(prev => {
           if (cloudWallet.balance === 0 && Number(prev.balance) > 0) return prev;
@@ -1477,8 +1486,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
+    // 2. Real-time snapshot subscription to Firestore user transactions
+    const unsubscribeTxs = subscribeToUserTransactionsRealtime(user.id, (cloudTxs) => {
+      if (Array.isArray(cloudTxs) && cloudTxs.length > 0) {
+        setTransactions(prev => {
+          const map = new Map<string, Transaction>();
+          prev.forEach(t => { if (t && t.id) map.set(t.id, t); });
+          cloudTxs.forEach(t => { if (t && t.id) map.set(t.id, t); });
+          const merged = Array.from(map.values()).sort((a, b) => {
+            const tA = a.createdAt ? Date.parse(a.createdAt) : (a.date ? Date.parse(a.date) : 0);
+            const tB = b.createdAt ? Date.parse(b.createdAt) : (b.date ? Date.parse(b.date) : 0);
+            return tB - tA;
+          });
+          safeSetItem(`lg_transactions_${user.id}`, JSON.stringify(merged));
+          return merged;
+        });
+      }
+    });
+
+    // 3. Real-time snapshot subscription to Firestore user notifications
+    const isCurrentAdmin = Boolean(
+      user.role === 'admin' || 
+      user.role === 'super_admin' || 
+      isAuthorizedAdminPhone(user.phone)
+    );
+    const unsubscribeNotifs = subscribeToUserNotifications(user.id, (cloudNotifs) => {
+      if (Array.isArray(cloudNotifs)) {
+        setNotifications(cloudNotifs);
+        safeSetItem('lg_notifications', JSON.stringify(cloudNotifs));
+      }
+    }, isCurrentAdmin);
+
     return () => {
-      unsubscribe();
+      unsubscribeUser();
+      unsubscribeTxs();
+      unsubscribeNotifs();
     };
   }, [user?.id, isLoggedIn]);
 
@@ -1651,7 +1693,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let sseSource: EventSource | null = null;
     try {
       if (typeof window !== 'undefined' && 'EventSource' in window) {
-        sseSource = new EventSource('/api/realtime/events');
+        sseSource = createSafeEventSource('/api/realtime/events');
         sseSource.onmessage = (e) => {
           try {
             if (!e.data || e.data.startsWith(':')) return;
@@ -2088,6 +2130,92 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       unsubJobs();
       unsubSubs();
+    };
+  }, []);
+
+  // Real-time Firestore sync for Withdrawals collection across all devices
+  useEffect(() => {
+    const unsubWithdrawals = subscribeToWithdrawalsRealtime((cloudWds) => {
+      if (!Array.isArray(cloudWds) || cloudWds.length === 0) return;
+      setWithdrawalRequests(prev => {
+        const map = new Map<string, WithdrawalRequest>();
+        (Array.isArray(prev) ? prev : []).forEach(w => { if (w && w.id) map.set(w.id, w); });
+        cloudWds.forEach(w => {
+          if (w && w.id) {
+            const existing = map.get(w.id);
+            map.set(w.id, { ...(existing || {}), ...w });
+          }
+        });
+        const merged = Array.from(map.values()).sort((a, b) => {
+          const timeA = a.createdAt ? Date.parse(a.createdAt) : 0;
+          const timeB = b.createdAt ? Date.parse(b.createdAt) : 0;
+          return timeB - timeA;
+        });
+        safeSetItem('lg_withdrawals', JSON.stringify(merged));
+        return merged;
+      });
+    });
+
+    return () => {
+      unsubWithdrawals();
+    };
+  }, []);
+
+  // Real-time Firestore sync for Registered Users collection (for Admin views across devices)
+  useEffect(() => {
+    const isCurrentAdmin = Boolean(
+      user?.role === 'admin' || 
+      user?.role === 'super_admin' || 
+      isAuthorizedAdminPhone(user?.phone)
+    );
+    if (!isCurrentAdmin) return;
+
+    const unsubAllUsers = subscribeToAllUsersRealtime((cloudUsers) => {
+      if (!Array.isArray(cloudUsers) || cloudUsers.length === 0) return;
+      setRegisteredUsers(prev => {
+        const map = new Map<string, UserProfile>();
+        (Array.isArray(prev) ? prev : []).forEach(u => { if (u && u.id) map.set(u.id, u); });
+        cloudUsers.forEach(u => {
+          if (u && u.id) {
+            const existing = map.get(u.id);
+            map.set(u.id, { ...(existing || {}), ...u });
+          }
+        });
+        const merged = Array.from(map.values());
+        persistRegisteredUsers(merged);
+        return merged;
+      });
+    });
+
+    return () => {
+      unsubAllUsers();
+    };
+  }, [user?.role, user?.phone]);
+
+  // Real-time Firestore sync for System Settings
+  useEffect(() => {
+    const unsubSettings = subscribeToSystemSettingsRealtime((cloudSettings) => {
+      if (!cloudSettings) return;
+      setSystemSettings(prev => ({
+        ...prev,
+        ...cloudSettings,
+        featureToggles: {
+          ...prev.featureToggles,
+          ...(cloudSettings.featureToggles || {})
+        },
+        featureRewards: {
+          ...prev.featureRewards,
+          ...(cloudSettings.featureRewards || {})
+        },
+        pageBannerAds: {
+          ...prev.pageBannerAds,
+          ...(cloudSettings.pageBannerAds || {})
+        }
+      }));
+    });
+
+    return () => {
+      unsubSettings();
     };
   }, []);
 
@@ -3554,6 +3682,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     syncWithdrawalWithFirestore(newReq);
+    if (user?.id && user.id !== 'usr_default_01') {
+      deductBalanceForWithdrawalInFirestore(user.id, newReq).catch(() => {});
+    }
 
     setIsWithdrawOpen(false);
     showToast(`উইথড্র রিকোয়েস্ট সফল! ৳${amount} প্রসেসিং চলছে।`);
@@ -4800,6 +4931,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'POST'
     }).catch(err => console.warn('Approve withdrawal API error:', err));
 
+    // Authoritative sync to Firestore
+    approveWithdrawalInFirestore(withdrawalId).catch(() => {});
+
     // Check if current user is the owner
     const isCurrentUser = Boolean(
       (user?.id && user.id !== 'usr_default_01' && req.userId === user.id) || 
@@ -4861,6 +4995,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason })
     }).catch(err => console.warn('Reject withdrawal API error:', err));
+
+    // Authoritative atomic refund in Firestore
+    rejectAndRefundWithdrawalInFirestore(req, reason).catch(() => {});
 
     // Check if current user is owner
     const isCurrentUser = Boolean(
@@ -6615,32 +6752,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
 
+    let updatedWallet: WalletState | null = null;
     setWallet(prev => {
       const nextBal = (prev.balance || 0) + rewardAmount;
       const nextTotalEarned = (prev.totalEarned || 0) + rewardAmount;
       const nextAdsIncome = (prev.incomeBreakdown?.adsIncome || 0) + rewardAmount;
-      return {
+      updatedWallet = {
         ...prev,
         balance: Math.round(nextBal * 100) / 100,
         totalEarned: Math.round(nextTotalEarned * 100) / 100,
         incomeBreakdown: {
           ...prev.incomeBreakdown,
           adsIncome: Math.round(nextAdsIncome * 100) / 100
-        }
+        },
+        updatedAt: new Date().toISOString()
       };
+      return updatedWallet;
     });
 
     const newTx: Transaction = {
       id: generateTxId('tx_ads'),
+      userId: user.id,
       type: 'bonus',
       amount: rewardAmount,
       date: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
       status: 'completed',
       description: `বিজ্ঞাপন ভিউ রিওয়ার্ড (${totalAdsCount}টি বিজ্ঞাপন সম্পন্ন)`,
       paymentMethod: 'system'
     };
 
     setTransactions(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)]);
+
+    if (user?.id && user.id !== 'usr_default_01') {
+      if (updatedWallet) syncUserWithFirestore(user, updatedWallet).catch(() => {});
+      syncTransactionWithFirestore(user.id, newTx).catch(() => {});
+    }
+
     showToast(`অভিনন্দন! ৳${rewardAmount.toFixed(2)} পয়েন্ট আপনার ওয়ালেটে জমা হয়েছে।`);
     return true;
   };
@@ -6648,6 +6796,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const creditUserReward = (amount: number, description: string, incomeType: 'job' | 'ads' | 'bonus' = 'job'): boolean => {
     if (amount <= 0) return false;
 
+    let updatedWallet: WalletState | null = null;
     setWallet(prev => {
       const nextBal = (prev.balance || 0) + amount;
       const nextTotalEarned = (prev.totalEarned || 0) + amount;
@@ -6667,25 +6816,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         breakdown.jobIncome = Math.round((breakdown.jobIncome + amount) * 100) / 100;
       }
 
-      return {
+      updatedWallet = {
         ...prev,
         balance: Math.round(nextBal * 100) / 100,
         totalEarned: Math.round(nextTotalEarned * 100) / 100,
-        incomeBreakdown: breakdown
+        incomeBreakdown: breakdown,
+        updatedAt: new Date().toISOString()
       };
+      return updatedWallet;
     });
 
     const newTx: Transaction = {
       id: generateTxId('tx_reward'),
+      userId: user.id,
       type: incomeType === 'job' ? 'job_reward' : 'bonus',
       amount: amount,
       date: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
       status: 'completed',
       description,
       paymentMethod: 'system'
     };
 
     setTransactions(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)]);
+
+    if (user?.id && user.id !== 'usr_default_01') {
+      if (updatedWallet) syncUserWithFirestore(user, updatedWallet).catch(() => {});
+      syncTransactionWithFirestore(user.id, newTx).catch(() => {});
+    }
+
     return true;
   };
 

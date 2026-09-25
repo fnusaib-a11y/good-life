@@ -59,6 +59,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number>(durationSeconds);
   const [containerWidth, setContainerWidth] = useState<number>(360);
+  const [dynamicHeight, setDynamicHeight] = useState<number | null>(null);
   const [retryNonce, setRetryNonce] = useState<number>(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,10 +67,13 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
   const timerRef = useRef<any>(null);
   const hasCompletedRef = useRef<boolean>(isCompleted);
 
-  // Responsive dimensions: On mobile (320px-480px) use full-width 300x250 responsive format
+  // Responsive dimensions: On mobile (320px-480px) use full-width 300x250 format, on desktop 468x60 / 728x90
   const isMobile = containerWidth < 600;
-  const adWidth = isMobile ? (containerWidth < 340 ? 300 : 320) : (containerWidth < 768 ? 468 : 728);
-  const adHeight = isMobile ? 250 : 90;
+  const adWidth = isMobile 
+    ? (containerWidth < 310 ? Math.max(250, Math.floor(containerWidth - 10)) : 300) 
+    : (containerWidth < 768 ? 468 : 728);
+  const baseAdHeight = isMobile ? 250 : 90;
+  const adHeight = dynamicHeight ? Math.max(baseAdHeight, dynamicHeight) : baseAdHeight;
 
   // Responsive container width tracking
   useEffect(() => {
@@ -97,8 +101,12 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
     const handleMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== 'object') return;
       
-      const { type, adId, error } = event.data;
+      const { type, adId, error, height } = event.data;
       if (adId !== uniqueInstanceId) return;
+
+      if (type === 'ADSTERRA_RESIZE' && typeof height === 'number' && height >= 200) {
+        setDynamicHeight(height);
+      }
 
       if (type === 'ADSTERRA_LOADED' || type === 'ADSTERRA_CONTENT_VERIFIED') {
         console.log(`[Adsterra] Ad instance ${uniqueInstanceId} successfully loaded and rendered.`);
@@ -134,7 +142,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -150,14 +158,21 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
     #ad-wrapper {
       width: 100%;
       max-width: 100%;
-      min-height: ${adHeight}px;
+      min-height: ${baseAdHeight}px;
       display: flex;
       justify-content: center;
       align-items: center;
+      overflow: visible;
+      margin: 0 auto;
+    }
+    #ad-wrapper > * {
+      max-width: 100% !important;
     }
     #ad-wrapper iframe, #ad-wrapper img {
       max-width: 100% !important;
       height: auto !important;
+      display: block !important;
+      margin: 0 auto !important;
     }
   </style>
 </head>
@@ -168,7 +183,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
       atOptions = {
         'key' : '${activeKey}',
         'format' : 'iframe',
-        'height' : ${adHeight},
+        'height' : ${baseAdHeight},
         'width' : ${adWidth},
         'params' : {}
       };
@@ -179,6 +194,19 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
     </script>
   </div>
   <script type="text/javascript">
+    // Auto-detect rendered height for responsive auto-expansion
+    function reportSize() {
+      try {
+        var h = document.body.scrollHeight || document.documentElement.scrollHeight;
+        if (h && h > 150) {
+          window.parent.postMessage({ type: 'ADSTERRA_RESIZE', adId: '${uniqueInstanceId}', height: h }, '*');
+        }
+      } catch(e) {}
+    }
+    window.addEventListener('load', reportSize);
+    setTimeout(reportSize, 1000);
+    setTimeout(reportSize, 2500);
+
     // Secondary check to confirm DOM element presence
     setTimeout(function() {
       try {
@@ -186,7 +214,6 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
         if (el && (el.children.length > 2 || el.querySelector('iframe, a, img'))) {
           window.parent.postMessage({ type: 'ADSTERRA_CONTENT_VERIFIED', adId: '${uniqueInstanceId}' }, '*');
         } else {
-          // If after 2.5s nothing injected, mark as active so timer doesn't permanently freeze user
           window.parent.postMessage({ type: 'ADSTERRA_LOADED', adId: '${uniqueInstanceId}' }, '*');
         }
       } catch(e) {}
@@ -360,7 +387,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
         {/* Dedicated Reserved Adsterra Ad Container */}
         <div 
           ref={containerRef}
-          className="w-full max-w-full bg-slate-950/70 rounded-xl border border-slate-800 p-2 sm:p-3 relative flex flex-col items-center justify-center min-h-[250px] sm:min-h-[260px] h-auto"
+          className="w-full max-w-full bg-slate-950/70 rounded-xl border border-slate-800 p-1 sm:p-3 relative flex flex-col items-center justify-center min-h-[250px] sm:min-h-[260px] h-auto overflow-visible"
         >
           {/* Loading Skeleton */}
           {adState === 'loading' && (
@@ -402,7 +429,7 @@ export const AdsterraQuizAdBox: React.FC<AdsterraQuizAdBoxProps> = ({
 
           {/* Sandboxed Adsterra iframe container */}
           <div 
-            className="w-full max-w-full flex items-center justify-center relative my-auto"
+            className="w-full max-w-full flex items-center justify-center relative my-auto overflow-visible"
             style={{ minHeight: `${adHeight}px` }}
           >
             <iframe

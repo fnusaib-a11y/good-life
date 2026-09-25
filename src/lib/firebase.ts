@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import { getAuth, signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { initializeFirestore, getFirestore, setLogLevel } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported, logEvent } from "firebase/analytics";
@@ -31,26 +31,26 @@ if (typeof window !== "undefined") {
   };
 }
 
-// Web app's Firebase configuration
+// Web & Mobile app's Firebase configuration
+const env = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {} as any;
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCFbLaT3tyGBoGPHpuSB3neCkEdTvoIVpc",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "kilagbe-e58bf.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "kilagbe-e58bf",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "kilagbe-e58bf.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "284870819080",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:284870819080:web:32d649e095b834a22c80bd",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-5HPK58SE7C"
+  apiKey: env.VITE_FIREBASE_API_KEY || "AIzaSyCFbLaT3tyGBoGPHpuSB3neCkEdTvoIVpc",
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "kilagbe-e58bf.firebaseapp.com",
+  projectId: env.VITE_FIREBASE_PROJECT_ID || "kilagbe-e58bf",
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "kilagbe-e58bf.firebasestorage.app",
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "284870819080",
+  appId: env.VITE_FIREBASE_APP_ID || "1:284870819080:web:32d649e095b834a22c80bd",
+  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || "G-5HPK58SE7C"
 };
 
 // Initialize Firebase App safely
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore Database with experimentalForceLongPolling for robust connectivity in iframes, proxies & sandboxes
+// Initialize Firestore Database with autoDetectLongPolling for robust connectivity in APKs, iframes & sandboxes
 export const auth = getAuth(app);
 export const db = (() => {
   try {
     return initializeFirestore(app, {
-      experimentalForceLongPolling: true,
       experimentalAutoDetectLongPolling: true,
     });
   } catch {
@@ -59,10 +59,25 @@ export const db = (() => {
 })();
 export const storage = getStorage(app);
 
-// Silently ensure anonymous authentication if needed for Firestore security rules
+// Reliably ensure authenticated session for Firestore security rules across Web and APK
 export const ensureFirebaseAuth = async () => {
   if (typeof window === "undefined" || !auth) return null;
   if (auth.currentUser) return auth.currentUser;
+  
+  // 1. Try signing in with authenticated service sync account
+  try {
+    const cred = await signInWithEmailAndPassword(auth, "goodlife_sync@goodlife.com", "GoodLifeSync@2026");
+    return cred.user;
+  } catch (err: any) {
+    if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
+      try {
+        const newCred = await createUserWithEmailAndPassword(auth, "goodlife_sync@goodlife.com", "GoodLifeSync@2026");
+        return newCred.user;
+      } catch {}
+    }
+  }
+
+  // 2. Fallback to anonymous sign-in if enabled
   try {
     const cred = await signInAnonymously(auth);
     return cred.user;

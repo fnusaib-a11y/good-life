@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && (request.auth.uid == userId || resource.data.userId == request.auth.uid);
+    }
+
+    // Default catch-all
+    match /{document=**} {
+      allow read, write: if true;
+    }
+
+    // Users collection and subcollections
+    match /users/{userId} {
+      allow read, write: if true;
+
+      match /transactions/{txId} {
+        allow read, write: if true;
+      }
+      match /processed_deposits/{depId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Deposits and Deposit Requests
+    match /deposits/{depId} {
+      allow read, write: if true;
+    }
+    match /deposit_requests/{depId} {
+      allow read, write: if true;
+    }
+
+    // Withdrawals
+    match /withdrawals/{withdrawalId} {
+      allow read, write: if true;
+    }
+
+    // Transactions
+    match /transactions/{txId} {
+      allow read, write: if true;
+    }
+
+    // Notifications
+    match /notifications/{notifId} {
+      allow read, write: if true;
+    }
+
+    // Micro jobs & Submissions
+    match /micro_jobs/{jobId} {
+      allow read, write: if true;
+    }
+    match /job_submissions/{submissionId} {
+      allow read, write: if true;
+    }
+
+    // System Settings & Config
+    match /system_settings/{configId} {
+      allow read, write: if true;
+    }
+
+    // Verification Requests, Reports, Applications
+    match /verification_requests/{requestId} {
+      allow read, write: if true;
+    }
+    match /reports/{reportId} {
+      allow read, write: if true;
+    }
+    match /service_applications/{appId} {
+      allow read, write: if true;
+    }
+    match /audit_logs/{logId} {
+      allow read, write: if true;
+    }
+  }
+}
