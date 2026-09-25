@@ -6,6 +6,7 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { createSafeEventSource } from './apiConfig';
 
 export type PendingRequestType = 'deposit' | 'verification' | 'order';
 
@@ -124,40 +125,45 @@ export function setupAdminFirestoreListeners(options: {
   // 0. Connect to Server-Sent Events (SSE) stream for real-time backend updates
   let eventSource: EventSource | null = null;
   try {
-    if (typeof window !== 'undefined' && 'EventSource' in window) {
-      eventSource = new EventSource('/api/realtime/events');
-      eventSource.onmessage = (e) => {
-        try {
-          if (!e.data || e.data.startsWith(':')) return;
-          const payload = JSON.parse(e.data);
-          if (payload && payload.type === 'new_deposit' && payload.deposit) {
-            const d = payload.deposit;
-            if (!knownDepositIds.has(d.id)) {
-              knownDepositIds.add(d.id);
-              playAdminNotificationSound();
-              const alertPayload: PendingAlertPayload = {
-                type: 'deposit',
-                id: d.id,
-                title: 'নতুন ডিপোজিট রিকোয়েস্ট!',
-                message: `ইউজার ${d.userName || 'গ্রাহক'} ৳${d.amount || 0} ডিপোজিট রিকোয়েস্ট জমা দিয়েছেন।`,
-                amount: d.amount,
-                userName: d.userName,
-                userPhone: d.userPhone || d.senderPhone
-              };
-              options.onAnyPendingAlert?.(alertPayload);
-              options.onNewDeposit?.(d);
-              window.dispatchEvent(new CustomEvent('goodlife:deposit_updated', { detail: d }));
+    if (typeof window !== 'undefined') {
+      eventSource = createSafeEventSource('/api/realtime/events');
+      if (eventSource) {
+        eventSource.onmessage = (e) => {
+          try {
+            if (!e.data || e.data.startsWith(':')) return;
+            const payload = JSON.parse(e.data);
+            if (payload && payload.type === 'new_deposit' && payload.deposit) {
+              const d = payload.deposit;
+              if (!knownDepositIds.has(d.id)) {
+                knownDepositIds.add(d.id);
+                playAdminNotificationSound();
+                const alertPayload: PendingAlertPayload = {
+                  type: 'deposit',
+                  id: d.id,
+                  title: 'নতুন ডিপোজিট রিকোয়েস্ট!',
+                  message: `ইউজার ${d.userName || 'গ্রাহক'} ৳${d.amount || 0} ডিপোজিট রিকোয়েস্ট জমা দিয়েছেন।`,
+                  amount: d.amount,
+                  userName: d.userName,
+                  userPhone: d.userPhone || d.senderPhone
+                };
+                options.onAnyPendingAlert?.(alertPayload);
+                options.onNewDeposit?.(d);
+                window.dispatchEvent(new CustomEvent('goodlife:deposit_updated', { detail: d }));
+              }
+            } else if (payload && payload.type === 'deposit_approved' && payload.deposit) {
+              window.dispatchEvent(new CustomEvent('goodlife:deposit_updated', { detail: payload.deposit }));
+              window.dispatchEvent(new CustomEvent('goodlife:wallet_updated', { detail: payload }));
+            } else if (payload && payload.type === 'deposit_rejected' && payload.deposit) {
+              window.dispatchEvent(new CustomEvent('goodlife:deposit_updated', { detail: payload.deposit }));
+            } else if (payload && (payload.type === 'user_updated' || payload.type === 'user_registered')) {
+              window.dispatchEvent(new CustomEvent('goodlife:user_updated', { detail: payload.user }));
+              window.dispatchEvent(new CustomEvent('goodlife:users_updated', { detail: payload.user }));
             }
-          } else if (payload && payload.type === 'deposit_approved' && payload.deposit) {
-            window.dispatchEvent(new CustomEvent('goodlife:deposit_updated', { detail: payload.deposit }));
-            window.dispatchEvent(new CustomEvent('goodlife:wallet_updated', { detail: payload }));
-          } else if (payload && payload.type === 'deposit_rejected' && payload.deposit) {
-            window.dispatchEvent(new CustomEvent('goodlife:deposit_updated', { detail: payload.deposit }));
+          } catch (err) {
+            // ignore parsing ping
           }
-        } catch (err) {
-          // ignore parsing ping
-        }
-      };
+        };
+      }
     }
   } catch (err) {
     console.warn('Could not establish SSE connection:', err);

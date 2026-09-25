@@ -30,6 +30,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({ onNavigateTa
     withdrawalRequests, 
     depositRequests,
     fetchFreshDeposits,
+    fetchFreshUsers,
     products, 
     jobs, 
     reports, 
@@ -45,16 +46,26 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({ onNavigateTa
     if (fetchFreshDeposits) {
       fetchFreshDeposits();
     }
+    if (fetchFreshUsers) {
+      fetchFreshUsers();
+    }
     const handleUpdate = () => {
       if (fetchFreshDeposits) {
         fetchFreshDeposits();
       }
+      if (fetchFreshUsers) {
+        fetchFreshUsers();
+      }
     };
     window.addEventListener('goodlife:deposit_updated', handleUpdate);
+    window.addEventListener('goodlife:user_updated', handleUpdate);
+    window.addEventListener('goodlife:users_updated', handleUpdate);
     return () => {
       window.removeEventListener('goodlife:deposit_updated', handleUpdate);
+      window.removeEventListener('goodlife:user_updated', handleUpdate);
+      window.removeEventListener('goodlife:users_updated', handleUpdate);
     };
-  }, [fetchFreshDeposits]);
+  }, [fetchFreshDeposits, fetchFreshUsers]);
 
   const pendingSubmissions = jobSubmissions.filter(s => s.status === 'pending');
   const pendingDeposits = depositRequests.filter(d => (d.status || 'pending').toLowerCase() === 'pending');
@@ -67,11 +78,16 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({ onNavigateTa
   const totalPendingPayoutAmount = pendingWithdrawals.reduce((sum, w) => sum + (w.amount || 0), 0);
   const userIds = new Set(
     [
-      isLoggedIn && user.id !== 'usr_default_01' && user.phone !== '01700000000' ? user.id : null,
-      ...(registeredUsers || []).map(u => (u.id !== 'usr_default_01' && u.phone !== '01700000000' && u.name !== 'Nusaib' ? u.id : null))
+      isLoggedIn && user?.id && !(user.id === 'usr_default_01' && user.name === 'নতুন সদস্য') ? user.id : null,
+      ...(registeredUsers || []).map(u => {
+        if (!u || !u.id) return null;
+        if (u.id === 'usr_default_01' && u.name === 'নতুন সদস্য') return null;
+        if (u.phone === '01700000000' && u.name === 'নতুন সদস্য') return null;
+        return u.id;
+      })
     ].filter(Boolean)
   );
-  const totalUsersCount = userIds.size;
+  const totalUsersCount = Math.max(userIds.size, (registeredUsers || []).length);
 
   const totalDepositPendingAmount = pendingDeposits.reduce((sum, d) => sum + (d.amount || 0), 0);
 

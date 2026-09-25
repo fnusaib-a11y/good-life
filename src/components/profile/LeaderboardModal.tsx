@@ -94,7 +94,8 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose }) =
 
     // Real registered users
     registeredUsers.forEach(ru => {
-      if (ru.id !== 'usr_default_01' && ru.phone && ru.phone !== '01700000000' && ru.name !== 'Nusaib') {
+      const isDummy = (ru.id === 'usr_default_01' || ru.phone === '01700000000') && ru.name === 'নতুন সদস্য';
+      if (!isDummy && ru.id && ru.phone) {
         const teamCount = registeredUsers.filter(u => {
           if (!u.referredBy || !ru.referralCode) return false;
           return (u.referredBy || '').trim().toUpperCase() === (ru.referralCode || '').trim().toUpperCase();

@@ -131,9 +131,20 @@ export const AdminUsersTab: React.FC = () => {
 
   const pendingVerifs = mergedVerifications.filter(v => v.status === 'pending');
 
-  // Refresh users on mount
+  // Refresh users on mount & on realtime database updates
   useEffect(() => {
     fetchFreshUsers?.();
+    const handleUpdate = () => {
+      fetchFreshUsers?.();
+    };
+    window.addEventListener('goodlife:user_updated', handleUpdate);
+    window.addEventListener('goodlife:users_updated', handleUpdate);
+    window.addEventListener('goodlife:wallet_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('goodlife:user_updated', handleUpdate);
+      window.removeEventListener('goodlife:users_updated', handleUpdate);
+      window.removeEventListener('goodlife:wallet_updated', handleUpdate);
+    };
   }, [fetchFreshUsers]);
 
   // Real deposit calculator for user
@@ -148,60 +159,62 @@ export const AdminUsersTab: React.FC = () => {
       .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
   };
 
-  // Real users list: registered users plus current user if not in registeredUsers
+  // Real users list: dynamically aggregated from database and real-time registered users
   const userMap = new Map<string, any>();
-  
-  // Current logged in user (only if logged in and not a dummy placeholder)
-  if (isLoggedIn && user && user.id && user.id !== 'usr_default_01' && user.phone && user.phone !== '01700000000') {
+
+  // 1. All real registered users from state / cloud database
+  (registeredUsers || []).forEach((ru, idx) => {
+    if (!ru) return;
+    const isDummy = (ru.id === 'usr_default_01' || ru.phone === '01700000000') && ru.name === 'নতুন সদস্য';
+    if (isDummy) return;
+
+    const validId = ru.id || (ru.phone ? `usr_${ru.phone.replace(/\D/g, '')}` : `user_${idx}`);
+    const calcDeposits = getUserTotalDeposits(validId, ru.phone);
+    const existing = userMap.get(validId);
+    userMap.set(validId, {
+      id: validId,
+      name: ru.name || existing?.name || 'সদস্য',
+      phone: ru.phone || existing?.phone || '',
+      email: ru.email || existing?.email || '',
+      avatar: ru.avatar || existing?.avatar,
+      role: ru.role || existing?.role || 'user',
+      status: ru.status || existing?.status || 'active',
+      statusReason: ru.statusReason || existing?.statusReason || '',
+      isVerified: ru.isVerified ?? existing?.isVerified ?? false,
+      verificationStatus: ru.verificationStatus || (ru.isVerified ? 'verified' : 'unverified'),
+      referralCode: ru.referralCode || existing?.referralCode || '',
+      joinedDate: ru.joinedDate || existing?.joinedDate || new Date().toISOString().split('T')[0],
+      balance: typeof (ru as any).balance === 'number' ? (ru as any).balance : (existing?.balance ?? 0),
+      totalDeposit: calcDeposits || (ru as any).totalDeposit || existing?.totalDeposit || 0,
+      totalWithdraw: (ru as any).totalWithdraw ?? existing?.totalWithdraw ?? 0,
+      totalEarned: (ru as any).totalEarned ?? existing?.totalEarned ?? 0
+    });
+  });
+
+  // 2. Current logged in user (ensure present in map if not already included)
+  if (isLoggedIn && user && user.id && !(user.id === 'usr_default_01' && user.name === 'নতুন সদস্য')) {
     const currentValidId = user.id || `usr_${(user.phone || '').replace(/\D/g, '')}` || 'usr_current';
     const depTotal = getUserTotalDeposits(currentValidId, user.phone);
+    const existing = userMap.get(currentValidId);
     userMap.set(currentValidId, {
       id: currentValidId,
-      name: user.name || 'সদস্য',
-      phone: user.phone,
-      email: user.email,
-      avatar: user.avatar,
-      role: user.role,
-      status: user.status || 'active',
-      statusReason: user.statusReason || '',
-      isVerified: user.isVerified,
+      name: user.name || existing?.name || 'সদস্য',
+      phone: user.phone || existing?.phone || '',
+      email: user.email || existing?.email || '',
+      avatar: user.avatar || existing?.avatar,
+      role: user.role || existing?.role || 'user',
+      status: user.status || existing?.status || 'active',
+      statusReason: user.statusReason || existing?.statusReason || '',
+      isVerified: user.isVerified ?? existing?.isVerified ?? false,
       verificationStatus: user.verificationStatus || (user.isVerified ? 'verified' : 'unverified'),
-      referralCode: user.referralCode,
-      joinedDate: user.joinedDate || new Date().toISOString().split('T')[0],
-      balance: wallet.balance,
-      totalDeposit: depTotal,
-      totalWithdraw: (wallet as any).totalWithdrawn || 0,
-      totalEarned: wallet.totalEarned || 0
+      referralCode: user.referralCode || existing?.referralCode || '',
+      joinedDate: user.joinedDate || existing?.joinedDate || new Date().toISOString().split('T')[0],
+      balance: typeof wallet?.balance === 'number' ? wallet.balance : (existing?.balance ?? 0),
+      totalDeposit: depTotal || existing?.totalDeposit || 0,
+      totalWithdraw: (wallet as any)?.totalWithdrawn ?? existing?.totalWithdraw ?? 0,
+      totalEarned: typeof wallet?.totalEarned === 'number' ? wallet.totalEarned : (existing?.totalEarned ?? 0)
     });
   }
-
-  // Real registered users from context / localStorage
-  registeredUsers.forEach((ru, idx) => {
-    if (!ru) return;
-    const validId = ru.id || (ru.phone ? `usr_${ru.phone.replace(/\D/g, '')}` : `user_${idx}`);
-    if (validId !== 'usr_default_01' && ru.phone && ru.phone !== '01700000000' && ru.name !== 'Nusaib') {
-      const calcDeposits = getUserTotalDeposits(validId, ru.phone);
-      const existing = userMap.get(validId);
-      userMap.set(validId, {
-        id: validId,
-        name: ru.name || existing?.name || 'সদস্য',
-        phone: ru.phone,
-        email: ru.email,
-        avatar: ru.avatar || existing?.avatar,
-        role: ru.role || existing?.role || 'user',
-        status: ru.status || existing?.status || 'active',
-        statusReason: ru.statusReason || existing?.statusReason || '',
-        isVerified: ru.isVerified ?? existing?.isVerified ?? false,
-        verificationStatus: ru.verificationStatus || (ru.isVerified ? 'verified' : 'unverified'),
-        referralCode: ru.referralCode,
-        joinedDate: ru.joinedDate || existing?.joinedDate || new Date().toISOString().split('T')[0],
-        balance: (ru as any).balance ?? existing?.balance ?? 0,
-        totalDeposit: calcDeposits || (ru as any).totalDeposit || existing?.totalDeposit || 0,
-        totalWithdraw: (ru as any).totalWithdraw ?? existing?.totalWithdraw ?? 0,
-        totalEarned: (ru as any).totalEarned ?? existing?.totalEarned ?? 0
-      });
-    }
-  });
 
   const allUsersList = Array.from(userMap.values());
 
@@ -710,7 +723,9 @@ export const AdminUsersTab: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-gray-400 font-medium">
+                        <div className="flex items-center gap-2 text-[10px] text-gray-400 font-medium flex-wrap">
+                          <span>UID: <code className="text-gray-700 bg-gray-100 px-1 py-0.5 rounded font-mono text-[9px]">{u.id}</code></span>
+                          <span>•</span>
                           <span>ফোন: <strong className="text-gray-700">{u.phone}</strong></span>
                           <span>•</span>
                           <span>রেফার: <strong className="text-gray-700">{u.referralCode}</strong></span>

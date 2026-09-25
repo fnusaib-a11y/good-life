@@ -85,7 +85,7 @@ import {
   deductBalanceForWithdrawalInFirestore,
   creditReferralBonusInFirestore
 } from '../lib/firestoreSync';
-import { createSafeEventSource } from '../lib/apiConfig';
+import { createSafeEventSource, resolveApiUrl } from '../lib/apiConfig';
 import { playAdminNotificationSound, triggerPendingRequestAlert } from '../lib/adminRealtimeService';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -497,7 +497,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.id === 'usr_nusaib_001' || parsed.name === 'Nusaib') {
+        if (parsed.id === 'usr_default_01' && parsed.name === 'নতুন সদস্য') {
           return {
             ...INITIAL_USER,
             referralCode: formatStrict4DigitReferral(INITIAL_USER.referralCode)
@@ -587,7 +587,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 balance: item.wallet?.balance ?? u.balance ?? 0
               };
             })
-            .filter(u => u && u.id !== 'usr_default_01' && u.phone && u.phone !== '01700000000' && u.name !== 'Nusaib' && u.name !== 'নতুন সদস্য');
+            .filter(u => u && !(u.id === 'usr_default_01' && u.name === 'নতুন সদস্য') && !(u.phone === '01700000000' && u.name === 'নতুন সদস্য'));
         }
       }
     } catch {}
@@ -1583,7 +1583,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Sync registered users from backend database
       try {
-        const uRes = await fetch('/api/users');
+        const uRes = await fetch(resolveApiUrl('/api/users'));
         if (uRes.ok) {
           const uJson = await uRes.json();
           if (uJson.success && Array.isArray(uJson.users)) {
@@ -2166,7 +2166,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const isCurrentAdmin = Boolean(
       user?.role === 'admin' || 
       user?.role === 'super_admin' || 
-      isAuthorizedAdminPhone(user?.phone)
+      isAuthorizedAdminPhone(user?.phone) ||
+      isAdminDashboardOpen
     );
     if (!isCurrentAdmin) return;
 
@@ -2187,10 +2188,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     });
 
+    const handleUserUpdateEvent = (e: Event) => {
+      const custom = e as CustomEvent<UserProfile>;
+      if (custom.detail && custom.detail.id) {
+        setRegisteredUsers(prev => {
+          const map = new Map<string, UserProfile>();
+          (Array.isArray(prev) ? prev : []).forEach(u => { if (u && u.id) map.set(u.id, u); });
+          const existing = map.get(custom.detail.id);
+          map.set(custom.detail.id, { ...(existing || {}), ...custom.detail });
+          const merged = Array.from(map.values());
+          persistRegisteredUsers(merged);
+          return merged;
+        });
+      }
+    };
+
+    window.addEventListener('goodlife:user_updated', handleUserUpdateEvent);
+    window.addEventListener('goodlife:users_updated', handleUserUpdateEvent);
+
     return () => {
       unsubAllUsers();
+      window.removeEventListener('goodlife:user_updated', handleUserUpdateEvent);
+      window.removeEventListener('goodlife:users_updated', handleUserUpdateEvent);
     };
-  }, [user?.role, user?.phone]);
+  }, [user?.role, user?.phone, isAdminDashboardOpen, persistRegisteredUsers]);
 
   // Real-time Firestore sync for System Settings
   useEffect(() => {
@@ -2419,7 +2440,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 1. Check backend database API for real user authentication
     try {
-      const serverRes = await fetch('/api/auth/login', {
+      const serverRes = await fetch(resolveApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phoneOrEmail: cleanInput, password })

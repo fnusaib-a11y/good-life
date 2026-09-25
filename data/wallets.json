@@ -29,29 +29,29 @@
   "usr_admin_01877722819": {
     "userId": "usr_admin_01877722819",
     "userPhone": "01877722819",
-    "balance": 0,
-    "totalEarned": 0,
+    "balance": 208,
+    "totalEarned": 346.88,
     "totalWithdrawn": 0,
     "pendingBalance": 0,
-    "updatedAt": "2026-09-22T15:48:24.416Z"
+    "updatedAt": "2026-09-24T12:58:35.339Z"
   },
   "usr_01877722819": {
     "userId": "usr_admin_01877722819",
     "userPhone": "01877722819",
-    "balance": 0,
-    "totalEarned": 0,
+    "balance": 208,
+    "totalEarned": 346.88,
     "totalWithdrawn": 0,
     "pendingBalance": 0,
-    "updatedAt": "2026-09-22T15:48:24.416Z"
+    "updatedAt": "2026-09-24T12:58:35.339Z"
   },
   "01877722819": {
     "userId": "usr_admin_01877722819",
     "userPhone": "01877722819",
-    "balance": 0,
-    "totalEarned": 0,
+    "balance": 208,
+    "totalEarned": 346.88,
     "totalWithdrawn": 0,
     "pendingBalance": 0,
-    "updatedAt": "2026-09-22T15:48:24.416Z"
+    "updatedAt": "2026-09-24T12:58:35.339Z"
   },
   "test_usr_1": {
     "userId": "test_usr_1",
@@ -61,5 +61,59 @@
     "totalWithdrawn": 100,
     "pendingBalance": 0,
     "updatedAt": "2026-09-22T15:48:48.916Z"
+  },
+  "usr_1788960803617": {
+    "userId": "usr_1788960803617",
+    "userPhone": "01926303509",
+    "balance": 150,
+    "totalEarned": 180,
+    "totalWithdrawn": 30,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-24T12:00:00.000Z"
+  },
+  "01926303509": {
+    "userId": "usr_1788960803617",
+    "userPhone": "01926303509",
+    "balance": 150,
+    "totalEarned": 180,
+    "totalWithdrawn": 30,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-24T12:00:00.000Z"
+  },
+  "usr_1788961278137": {
+    "userId": "usr_1788961278137",
+    "userPhone": "01916136197",
+    "balance": 80,
+    "totalEarned": 80,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-24T12:00:00.000Z"
+  },
+  "01916136197": {
+    "userId": "usr_1788961278137",
+    "userPhone": "01916136197",
+    "balance": 80,
+    "totalEarned": 80,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-24T12:00:00.000Z"
+  },
+  "usr_1788962000747": {
+    "userId": "usr_1788962000747",
+    "userPhone": "01986922761",
+    "balance": 25,
+    "totalEarned": 25,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-24T12:00:00.000Z"
+  },
+  "01986922761": {
+    "userId": "usr_1788962000747",
+    "userPhone": "01986922761",
+    "balance": 25,
+    "totalEarned": 25,
+    "totalWithdrawn": 0,
+    "pendingBalance": 0,
+    "updatedAt": "2026-09-24T12:00:00.000Z"
   }
 }

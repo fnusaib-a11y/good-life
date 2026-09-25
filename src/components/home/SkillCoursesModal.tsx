@@ -57,7 +57,7 @@ export const SkillCoursesModal: React.FC<SkillCoursesModalProps> = ({ type, onCl
 
   // Application Form state
   const [applyingItem, setApplyingItem] = useState<ApplyItem | null>(null);
-  const [applicantName, setApplicantName] = useState(user?.name && user?.name !== 'Nusaib' ? user.name : '');
+  const [applicantName, setApplicantName] = useState(user?.name || '');
   const [applicantPhone, setApplicantPhone] = useState(user?.phone || '');
   const [whatsappNumber, setWhatsappNumber] = useState(user?.phone || '');
   const [experienceLevel, setExperienceLevel] = useState('নতুন শিখতে আগ্রহী (শুরুর লেভেল)');
@@ -95,7 +95,7 @@ export const SkillCoursesModal: React.FC<SkillCoursesModalProps> = ({ type, onCl
   const handleOpenApplyModal = (item: ApplyItem) => {
     setApplyingItem(item);
     setSubmissionSuccess(null);
-    setApplicantName(user?.name && user?.name !== 'Nusaib' ? user.name : '');
+    setApplicantName(user?.name || '');
     setApplicantPhone(user?.phone || '');
     setWhatsappNumber(user?.phone || '');
     setExperienceLevel('নতুন শিখতে আগ্রহী (শুরুর লেভেল)');

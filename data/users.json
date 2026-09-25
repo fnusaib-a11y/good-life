@@ -48,6 +48,22 @@
     "updatedAt": "2026-09-09T14:08:58.821Z"
   },
   {
+    "id": "usr_1789992708628",
+    "name": "Nusaib Ahmed",
+    "phone": "01926303508",
+    "email": "fnusaib@gmail.com",
+    "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=usr_1789992708628",
+    "role": "user",
+    "isVerified": true,
+    "verificationStatus": "verified",
+    "status": "active",
+    "referralCode": "3508",
+    "joinedDate": "2026-09-12",
+    "password": "123456",
+    "createdAt": "2026-09-12T10:00:00.000Z",
+    "updatedAt": "2026-09-21T12:17:28.073Z"
+  },
+  {
     "id": "usr_admin_01877722819",
     "name": "সুপার এডমিন (Admin)",
     "phone": "01877722819",
